@@ -1,0 +1,7 @@
+# Request: Navigation configuration to set
+NavConfig config
+---
+# Response: Result of the configuration update
+bool success
+string message
+NavConfig current_config

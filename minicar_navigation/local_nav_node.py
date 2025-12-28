@@ -10,6 +10,10 @@ from geometry_msgs.msg import Twist, PoseStamped
 from nav_msgs.msg import Path
 from std_msgs.msg import Header
 
+from rcl_interfaces.msg import SetParametersResult
+from rclpy.parameter import Parameter
+import threading
+
 from .planner import local_path_planner
 from .controller import ControllerFactory
 
@@ -42,7 +46,11 @@ class LocalNavNode(Node):
         self.latest_lidar_data = None  # {'ranges': np.ndarray, 'angles': np.ndarray}
 
         # プランナーとコントローラーの初期化
-        self.planner = local_path_planner.LocalPathPlanner()
+        self.planner = local_path_planner.LocalPathPlanner()        
+        
+        self._ctrl_lock = threading.Lock()
+        self.add_on_set_parameters_callback(self._on_parameters_updated)
+        
         self._initialize_controller()
 
     def scan_callback(self, msg: LaserScan):
@@ -80,7 +88,8 @@ class LocalNavNode(Node):
         # scan がまだなら何もしない（または停止指令）
         if self.latest_lidar_data is None:
             return
-
+        if not hasattr(self, "controller") or self.controller is None:
+            return
         lidar_data = self.latest_lidar_data
 
         # プランナーでパス生成して出力確認
@@ -100,6 +109,10 @@ class LocalNavNode(Node):
                 
                 # パス追従制御
                 if len(selected_path) > 0:
+                    # controller をローカルに退避（差し替え中に参照が壊れないように）
+                    with self._ctrl_lock:
+                        controller = self.controller
+
                     linear_vel, angular_vel = self.controller.compute_control(selected_path)
                     
                     # 制御コマンドを送信
@@ -278,6 +291,32 @@ class LocalNavNode(Node):
             kd_str = f"{kd:.2f}" if isinstance(kd, (int, float)) else str(kd)
             
             self.get_logger().info(f"PD gains: KP={kp_str}, KD={kd_str}")
+            
+    def _on_parameters_updated(self, params: list[Parameter]) -> SetParametersResult:
+        """
+        パラメータ更新を検知して controller を再初期化する
+        ロジックは一切変更しない
+        """
+
+        # controller / common / controllers.* に関係ない変更は無視してOK
+        relevant = any(
+            p.name == "controller_type"
+            or p.name.startswith("common.")
+            or p.name.startswith("controllers.")
+            for p in params
+        )
+
+        if not relevant:
+            return SetParametersResult(successful=True)
+
+        # パラメータが適用された「後」に再初期化したいので遅延実行
+        def apply():
+            with self._ctrl_lock:
+                self._initialize_controller()
+            self.get_logger().info("Controller re-initialized due to parameter update.")
+
+        self.create_timer(0.0, apply)
+        return SetParametersResult(successful=True)
 
 
 def main():
