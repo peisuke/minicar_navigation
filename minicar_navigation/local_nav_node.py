@@ -17,20 +17,23 @@ class LocalNavNode(Node):
     def __init__(self):
         super().__init__("local_nav_node")
 
+        # パラメータの宣言（YAMLファイルから読み込まれるパラメータも含む）
+        self.declare_parameter('controller_type_override', '')
+        self.declare_parameter('controller_type', 'pd')
+        
+        # Namespace control parameters
+        self.declare_parameter('sim_ns', 'sim_robot')
+        self.declare_parameter('real_ns', 'real_robot')
+        self.declare_parameter('input_sim', True)
+        self.declare_parameter('input_real', False)
+        self.declare_parameter('output_sim', True)
+        self.declare_parameter('output_real', False)
+
         # ---- Subscriber (LiDAR) ----
-        self.scan_sub = self.create_subscription(
-            LaserScan,
-            "/scan",
-            self.scan_callback,
-            10,
-        )
+        self.scan_sub = self._setup_input_subscribers()
 
         # ---- Publisher (cmd_vel) ----
-        self.cmd_pub = self.create_publisher(
-            Twist,
-            "/diff_drive_controller/cmd_vel_unstamped",
-            10,
-        )
+        self.cmd_publishers = self._setup_output_publishers()
         
         # ---- Publisher (paths for visualization) ----
         self.path_pub = self.create_publisher(
@@ -41,10 +44,6 @@ class LocalNavNode(Node):
 
         # ---- Timer for control loop ----
         self.timer = self.create_timer(0.1, self.control_loop)  # 10 Hz
-
-        # パラメータの宣言（YAMLファイルから読み込まれるパラメータも含む）
-        self.declare_parameter('controller_type_override', '')
-        self.declare_parameter('controller_type', 'pd')
         
         self.get_logger().info("LocalNavNode started")
 
@@ -117,7 +116,7 @@ class LocalNavNode(Node):
                     cmd = Twist()
                     cmd.linear.x = linear_vel
                     cmd.angular.z = angular_vel
-                    self.cmd_pub.publish(cmd)
+                    self._publish_cmd_vel(cmd)
                     
                     self.get_logger().info(f"Control: linear={linear_vel:.3f}, angular={angular_vel:.3f}")
                     
@@ -128,7 +127,7 @@ class LocalNavNode(Node):
                 else:
                     # パスがない場合は停止
                     stop_cmd = Twist()
-                    self.cmd_pub.publish(stop_cmd)
+                    self._publish_cmd_vel(stop_cmd)
                         
             except Exception as e:
                 self.get_logger().error(f"generate_local_paths failed: {e}")
@@ -137,7 +136,7 @@ class LocalNavNode(Node):
                 
                 # エラー時は停止
                 stop_cmd = Twist()
-                self.cmd_pub.publish(stop_cmd)
+                self._publish_cmd_vel(stop_cmd)
 
         # 動作確認のため直進（パス追従制御時はコメントアウト）
         # cmd = Twist()
@@ -164,6 +163,64 @@ class LocalNavNode(Node):
         self.path_pub.publish(path_msg)
         self.get_logger().debug(f"Published path with {len(path_msg.poses)} poses")
     
+    def _setup_input_subscribers(self):
+        """Setup input subscribers based on namespace parameters"""
+        # Get namespace parameters
+        input_sim = self.get_parameter('input_sim').get_parameter_value().bool_value
+        input_real = self.get_parameter('input_real').get_parameter_value().bool_value
+        sim_ns = self.get_parameter('sim_ns').get_parameter_value().string_value
+        real_ns = self.get_parameter('real_ns').get_parameter_value().string_value
+        
+        # Validation
+        if not (input_sim or input_real):
+            raise ValueError("At least one of input_sim or input_real must be true")
+        
+        # For now, create subscriber for the primary input source
+        # TODO: Handle multiple input sources (data fusion)
+        if input_sim:
+            scan_topic = f"/{sim_ns}/scan" if sim_ns else "/scan"
+            self.get_logger().info(f"Subscribing to sim LiDAR: {scan_topic}")
+        else:
+            scan_topic = f"/{real_ns}/scan" if real_ns else "/scan"
+            self.get_logger().info(f"Subscribing to real LiDAR: {scan_topic}")
+            
+        return self.create_subscription(
+            LaserScan,
+            scan_topic,
+            self.scan_callback,
+            10,
+        )
+    
+    def _setup_output_publishers(self):
+        """Setup output publishers based on namespace parameters"""
+        # Get namespace parameters
+        output_sim = self.get_parameter('output_sim').get_parameter_value().bool_value
+        output_real = self.get_parameter('output_real').get_parameter_value().bool_value
+        sim_ns = self.get_parameter('sim_ns').get_parameter_value().string_value
+        real_ns = self.get_parameter('real_ns').get_parameter_value().string_value
+        
+        publishers = {}
+        
+        if output_sim:
+            sim_topic = f"/{sim_ns}/diff_drive_controller/cmd_vel_unstamped"
+            publishers['sim'] = self.create_publisher(Twist, sim_topic, 10)
+            self.get_logger().info(f"Publishing to sim robot: {sim_topic}")
+            
+        if output_real:
+            real_topic = f"/{real_ns}/diff_drive_controller/cmd_vel_unstamped"
+            publishers['real'] = self.create_publisher(Twist, real_topic, 10)
+            self.get_logger().info(f"Publishing to real robot: {real_topic}")
+            
+        if not publishers:
+            self.get_logger().warn("No output publishers configured!")
+            
+        return publishers
+    
+    def _publish_cmd_vel(self, cmd_msg):
+        """Publish command to all configured output publishers"""
+        for name, publisher in self.cmd_publishers.items():
+            publisher.publish(cmd_msg)
+            
     def _initialize_controller(self):
         """パラメータに基づいてコントローラーを初期化"""
         # コントローラータイプの決定（オーバーライド優先）
@@ -252,7 +309,7 @@ def main():
         pass
     finally:
         stop = Twist()
-        node.cmd_pub.publish(stop)
+        node._publish_cmd_vel(stop)
         node.destroy_node()
         rclpy.shutdown()
 

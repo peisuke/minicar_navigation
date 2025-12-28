@@ -10,6 +10,12 @@ from launch_ros.parameter_descriptions import ParameterValue
 def generate_launch_description():
     
     # Launch arguments
+    robot_ns_arg = DeclareLaunchArgument(
+        'robot_ns',
+        default_value='sim_robot',
+        description='Robot namespace'
+    )
+    
     use_sim_time_arg = DeclareLaunchArgument(
         'use_sim_time',
         default_value='true',
@@ -17,6 +23,7 @@ def generate_launch_description():
     )
     
     # Launch configurations
+    robot_ns = LaunchConfiguration('robot_ns')
     use_sim_time = LaunchConfiguration('use_sim_time')
     
     # Process xacro file
@@ -26,9 +33,10 @@ def generate_launch_description():
         'minicar_diff_gazebo.xacro'
     ])
     
-    robot_description = ParameterValue(Command(['xacro ', xacro_file]), value_type=str)
+    robot_description = ParameterValue(Command(['xacro ', xacro_file, ' robot_ns:=', robot_ns]), value_type=str)
     
     return LaunchDescription([
+        robot_ns_arg,
         use_sim_time_arg,
         
         # Robot state publisher
@@ -36,26 +44,11 @@ def generate_launch_description():
             package='robot_state_publisher',
             executable='robot_state_publisher',
             name='robot_state_publisher',
+            namespace=robot_ns,
             output='screen',
             parameters=[{
                 'robot_description': robot_description,
                 'use_sim_time': use_sim_time
             }]
-        ),
-        
-        # Joint state broadcaster spawner
-        Node(
-            package='controller_manager',
-            executable='spawner',
-            arguments=['joint_state_broadcaster'],
-            output='screen'
-        ),
-        
-        # Diff drive controller spawner
-        Node(
-            package='controller_manager',
-            executable='spawner',
-            arguments=['diff_drive_controller'],
-            output='screen'
         )
     ])

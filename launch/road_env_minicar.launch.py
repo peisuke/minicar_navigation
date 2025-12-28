@@ -18,6 +18,7 @@ def generate_launch_description():
     z = LaunchConfiguration("z")
     yaw = LaunchConfiguration("yaw")
     use_sim_time = LaunchConfiguration("use_sim_time")
+    robot_ns = LaunchConfiguration("robot_ns")
     jsb_name = LaunchConfiguration("joint_state_broadcaster")
     diff_name = LaunchConfiguration("diff_controller")
 
@@ -47,16 +48,19 @@ def generate_launch_description():
         PythonLaunchDescriptionSource(
             PathJoinSubstitution([pkg_minicar, "description", "launch", "robot_state_publisher.launch.py"])
         ),
-        launch_arguments={"use_sim_time": use_sim_time}.items(),
+        launch_arguments={
+            "use_sim_time": use_sim_time,
+            "robot_ns": robot_ns
+        }.items(),
     )
 
-    # 2) Gazeboへスポーン（/robot_description を読む）
+    # 2) Gazeboへスポーン（robot_description を読む）
     spawn = Node(
         package="gazebo_ros",
         executable="spawn_entity.py",
         output="screen",
         arguments=[
-            "-topic", "/robot_description",
+            "-topic", ["/", robot_ns, "/robot_description"],
             "-entity", entity,
             "-x", x, "-y", y, "-z", z,
             "-Y", yaw,
@@ -67,18 +71,21 @@ def generate_launch_description():
     #    Gazebo + spawn の立ち上がりに少し時間が要るので遅延起動（安定重視）
     spawn_after_delay = TimerAction(period=3.0, actions=[spawn])
 
+    # Controller manager path
+    cm_fqn = ["/", robot_ns, "/controller_manager"]
+    
     spawn_jsb = Node(
         package="controller_manager",
         executable="spawner",
         output="screen",
-        arguments=[jsb_name, "--controller-manager", "/controller_manager"],
+        arguments=[jsb_name, "--controller-manager", cm_fqn],
     )
 
     spawn_diff = Node(
         package="controller_manager",
         executable="spawner",
         output="screen",
-        arguments=[diff_name, "--controller-manager", "/controller_manager"],
+        arguments=[diff_name, "--controller-manager", cm_fqn],
     )
 
     controllers_after_delay = TimerAction(
@@ -94,10 +101,14 @@ def generate_launch_description():
         DeclareLaunchArgument("z", default_value="0.05"),
         DeclareLaunchArgument("yaw", default_value="0.0"),
         DeclareLaunchArgument("use_sim_time", default_value="true"),
+        DeclareLaunchArgument("robot_ns", default_value="sim_robot"),
+        DeclareLaunchArgument("joint_state_broadcaster", default_value="joint_state_broadcaster"),
+        DeclareLaunchArgument("diff_controller", default_value="diff_drive_controller"),
 
         model_path_env,
         gazebo_launch,
         rsp_launch,
         spawn_after_delay,
+        controllers_after_delay,
     ])
 

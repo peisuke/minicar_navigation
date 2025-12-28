@@ -1,6 +1,9 @@
 <?xml version="1.0"?>
 <robot name="minicar_diff" xmlns:xacro="http://www.ros.org/wiki/xacro">
 
+  <!-- Launch arguments -->
+  <xacro:arg name="robot_ns" default="sim_robot"/>
+
   <!-- Constants for robot dimensions -->
   <xacro:property name="PI" value="3.1415926535897931"/>
   
@@ -192,7 +195,7 @@
       <robot_sim_type>gazebo_ros2_control/GazeboSystem</robot_sim_type>
       <parameters>$(find minicar_navigation)/description/config/minicar_diff_controller.yaml</parameters>
       <ros>
-        <namespace>/</namespace>
+        <namespace>/$(arg robot_ns)</namespace>
       </ros>
     </plugin>
   </gazebo>
@@ -226,6 +229,7 @@
       </ray>
       <plugin name="laser_controller" filename="libgazebo_ros_ray_sensor.so">
         <ros>
+          <namespace>/$(arg robot_ns)</namespace>
           <remapping>~/out:=scan</remapping>
         </ros>
         <output_type>sensor_msgs/LaserScan</output_type>
