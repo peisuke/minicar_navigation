@@ -16,24 +16,6 @@ setup(
         # robot navigation files
         (os.path.join('share', package_name, 'launch'), glob('launch/*.launch.py')),
         (os.path.join('share', package_name, 'config'), glob('config/*.yaml')),
-
-        # robot simulation environment: road_env
-        (os.path.join('share', package_name, 'minicar_simulation/worlds'), 
-            glob('minicar_simulation/worlds/*.world')
-        ),
-        (os.path.join('share', package_name, 'minicar_simulation/models/road_env'),
-            ['minicar_simulation/models/road_env/model.config',
-             'minicar_simulation/models/road_env/model.sdf']
-        ),
-        (os.path.join('share', package_name, 'minicar_simulation/models/road_env/meshes'),
-            glob('minicar_simulation/models/road_env/meshes/*')
-        ),
-
-        # robot description files
-        (os.path.join('share', package_name, 'description/launch'), glob('description/launch/*.py')),
-        (os.path.join('share', package_name, 'description/config'), glob('description/config/*.yaml')),
-        (os.path.join('share', package_name, 'description/urdf'), glob('description/urdf/*.urdf')),
-        (os.path.join('share', package_name, 'description/urdf'), glob('description/urdf/*.xacro')),
     ],
     install_requires=['setuptools'],
     zip_safe=True,
