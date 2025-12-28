@@ -14,11 +14,11 @@ from ament_index_python.packages import get_package_share_directory
 
 def validate_and_create_nodes(context, *args, **kwargs):
     """Validate input arguments and create nodes"""
-    # Get parameter values
-    input_sim = context.launch_configurations.get('input_sim', 'true').lower() == 'true'
-    input_real = context.launch_configurations.get('input_real', 'false').lower() == 'true'
-    output_sim = context.launch_configurations.get('output_sim', 'true').lower() == 'true'
-    output_real = context.launch_configurations.get('output_real', 'false').lower() == 'true'
+    # Get parameter values using .perform(context) for proper substitution evaluation
+    input_sim = LaunchConfiguration('input_sim').perform(context).lower() == 'true'
+    input_real = LaunchConfiguration('input_real').perform(context).lower() == 'true'
+    output_sim = LaunchConfiguration('output_sim').perform(context).lower() == 'true'
+    output_real = LaunchConfiguration('output_real').perform(context).lower() == 'true'
     
     # Validation
     if not (input_sim or input_real):
@@ -31,18 +31,24 @@ def validate_and_create_nodes(context, *args, **kwargs):
         print("WARNING: No output destinations specified. Node will run but not publish commands.")
     
     # Get other configurations
-    config_file = context.launch_configurations.get('config_file')
-    controller_type = context.launch_configurations.get('controller_type', '')
-    sim_ns = context.launch_configurations.get('sim_ns', 'sim_robot')
-    real_ns = context.launch_configurations.get('real_ns', 'real_robot')
-    
+    pkg_share = get_package_share_directory('minicar_navigation')
+    config_file_path = LaunchConfiguration('config_file').perform(context)
+    controller_type = LaunchConfiguration('controller_type').perform(context)
+    sim_ns = LaunchConfiguration('sim_ns').perform(context)
+    real_ns = LaunchConfiguration('real_ns').perform(context)
+
+    print(f"[local_nav.launch] config_file_path: {config_file_path}")
+    print(f"[local_nav.launch] controller_type_override: '{controller_type}'")
+    print(f"[local_nav.launch] sim_ns={sim_ns} real_ns={real_ns} "
+      f"input_sim={input_sim} input_real={input_real} output_sim={output_sim} output_real={output_real}")
+
     # Local navigation node
     local_nav_node = Node(
         package='minicar_navigation',
         executable='local_nav',
         name='local_nav_node',
         parameters=[
-            config_file,
+            config_file_path,
             {
                 'controller_type_override': controller_type,
                 'sim_ns': sim_ns,

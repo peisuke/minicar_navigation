@@ -6,7 +6,7 @@ local_nav_node:
     # 共通パラメータ
     common:
       lookahead_distance: 0.3
-      target_velocity: 0.3
+      target_velocity: 0.1
       max_angular_velocity: 1.0
       goal_tolerance: 0.1
     

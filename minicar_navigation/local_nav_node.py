@@ -15,19 +15,9 @@ from .controller import ControllerFactory
 
 class LocalNavNode(Node):
     def __init__(self):
-        super().__init__("local_nav_node")
+        super().__init__("local_nav_node", automatically_declare_parameters_from_overrides=True)
 
-        # パラメータの宣言（YAMLファイルから読み込まれるパラメータも含む）
-        self.declare_parameter('controller_type_override', '')
-        self.declare_parameter('controller_type', 'pd')
-        
-        # Namespace control parameters
-        self.declare_parameter('sim_ns', 'sim_robot')
-        self.declare_parameter('real_ns', 'real_robot')
-        self.declare_parameter('input_sim', True)
-        self.declare_parameter('input_real', False)
-        self.declare_parameter('output_sim', True)
-        self.declare_parameter('output_real', False)
+        # パラメータはautomatically_declare_parameters_from_overridesで自動宣言される
 
         # ---- Subscriber (LiDAR) ----
         self.scan_sub = self._setup_input_subscribers()
@@ -253,20 +243,10 @@ class LocalNavNode(Node):
         """指定されたプレフィックスのパラメータを辞書として取得"""
         param_dict = {}
         try:
+            # get_parameters_by_prefix は辞書を返し、keyからprefixが自動で除去される
             params = self.get_parameters_by_prefix(prefix)
-            for param in params:
-                # パラメータ名からプレフィックスを除去
-                key = param.name[len(prefix)+1:] if prefix else param.name
-                
-                # 型に応じて値を取得
-                if param.type_ == param.Type.DOUBLE:
-                    param_dict[key] = param.value
-                elif param.type_ == param.Type.INTEGER:
-                    param_dict[key] = param.value
-                elif param.type_ == param.Type.STRING:
-                    param_dict[key] = param.value
-                elif param.type_ == param.Type.BOOL:
-                    param_dict[key] = param.value
+            for key, param in params.items():
+                param_dict[key] = param.value
                     
         except Exception as e:
             self.get_logger().warn(f"Failed to get parameters with prefix '{prefix}': {e}")
