@@ -1,0 +1,28 @@
+local_nav_node:
+  ros__parameters:
+    # コントローラータイプ
+    controller_type: "pd"
+    
+    # 共通パラメータ
+    common:
+      lookahead_distance: 0.3
+      target_velocity: 0.3
+      max_angular_velocity: 1.0
+      goal_tolerance: 0.1
+    
+    # コントローラー固有パラメータ
+    controllers:
+      p:
+        # P制御は共通パラメータのみ使用
+        dummy: 1
+      
+      pd:
+        kp_angular: 2.0
+        kd_angular: 0.5
+      
+      # 将来のコントローラー用（例）
+      # mpc:
+      #   prediction_horizon: 10
+      #   control_horizon: 3
+      #   weight_position: 1.0
+      #   weight_orientation: 0.5

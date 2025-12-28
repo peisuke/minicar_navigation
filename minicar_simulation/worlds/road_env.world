@@ -1,0 +1,36 @@
+<?xml version="1.0" ?>
+<sdf version="1.6">
+  <world name="road_env_world">
+
+    <scene>
+      <ambient>0.6 0.6 0.6 1</ambient>
+      <background>0.2 0.2 0.2 1</background>
+      <shadows>true</shadows>
+    </scene>
+
+    <light name="sun" type="directional">
+      <pose>0 0 10 0.4 0.8 0</pose>
+      <direction>-0.3 -0.3 -1</direction>
+      <diffuse>1 1 1 1</diffuse>
+      <specular>0.1 0.1 0.1 1</specular>
+      <cast_shadows>true</cast_shadows>
+    </light>
+
+    <include>
+      <uri>model://ground_plane</uri>
+    </include>
+
+    <include>
+      <uri>model://road_env</uri>
+    </include>
+
+    <gui fullscreen="0">
+      <camera name="top_view">
+        <pose>0 0 20 0 1.57079632679 0</pose>
+        <projection_type>orthographic</projection_type>
+	      <ortho_width>40</ortho_width>
+      </camera>
+    </gui>
+
+  </world>
+</sdf>

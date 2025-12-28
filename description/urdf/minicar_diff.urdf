@@ -1,0 +1,159 @@
+<?xml version="1.0"?>
+<robot name="minicar_diff" xmlns:xacro="http://www.ros.org/wiki/xacro">
+
+  <!-- Constants for robot dimensions -->
+  <xacro:property name="PI" value="3.1415926535897931"/>
+  
+  <!-- Robot body dimensions (meters) -->
+  <xacro:property name="body_length" value="0.22"/>
+  <xacro:property name="body_width" value="0.16"/>
+  <xacro:property name="body_height" value="0.065"/>  <!-- 10cm total - 3.5cm wheel radius -->
+  
+  <!-- Wheel dimensions -->
+  <xacro:property name="wheel_radius" value="0.035"/>
+  <xacro:property name="wheel_width" value="0.025"/>
+  <xacro:property name="wheel_separation_width" value="0.195"/>
+  <xacro:property name="wheel_separation_length" value="0.115"/>
+  
+  <!-- Caster wheel dimensions -->
+  <xacro:property name="caster_radius" value="0.015"/>
+  
+  <!-- LiDAR dimensions -->
+  <xacro:property name="lidar_radius" value="0.035"/>
+  <xacro:property name="lidar_height" value="0.04"/>
+
+  <!-- Base footprint (contact point with ground) -->
+  <link name="base_footprint">
+    <visual>
+      <geometry>
+        <box size="0.001 0.001 0.001"/>
+      </geometry>
+    </visual>
+  </link>
+
+  <!-- Base link (robot center) -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <material name="white">
+        <color rgba="0.8 0.8 0.8 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="${body_length} ${body_width} ${body_height}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="2.0"/>
+      <inertia ixx="0.0123" ixy="0.0" ixz="0.0" iyy="0.0123" iyz="0.0" izz="0.0246"/>
+    </inertial>
+  </link>
+
+  <!-- Base footprint to base link -->
+  <joint name="base_joint" type="fixed">
+    <parent link="base_footprint"/>
+    <child link="base_link"/>
+    <origin xyz="0 0 ${wheel_radius}" rpy="0 0 0"/>
+  </joint>
+
+  <!-- Macro for wheels -->
+  <xacro:macro name="wheel" params="prefix x y flip">
+    <link name="${prefix}_wheel">
+      <visual>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+        <material name="black">
+          <color rgba="0.0 0.0 0.0 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <cylinder radius="${wheel_radius}" length="${wheel_width}"/>
+        </geometry>
+        <origin xyz="0 0 0" rpy="${PI/2} 0 0"/>
+      </collision>
+      <inertial>
+        <mass value="0.2"/>
+        <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+      </inertial>
+    </link>
+
+    <joint name="${prefix}_wheel_joint" type="continuous">
+      <parent link="base_link"/>
+      <child link="${prefix}_wheel"/>
+      <origin xyz="${x} ${y * flip} 0" rpy="0 0 0"/>
+      <axis xyz="0 1 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- Drive wheels (rear) -->
+  <xacro:wheel prefix="left_rear" x="${-wheel_separation_length/2}" y="${wheel_separation_width/2}" flip="1"/>
+  <xacro:wheel prefix="right_rear" x="${-wheel_separation_length/2}" y="${wheel_separation_width/2}" flip="-1"/>
+
+  <!-- Macro for caster wheels -->
+  <xacro:macro name="caster" params="prefix x y flip">
+    <link name="${prefix}_caster">
+      <visual>
+        <geometry>
+          <sphere radius="${caster_radius}"/>
+        </geometry>
+        <material name="gray">
+          <color rgba="0.5 0.5 0.5 1.0"/>
+        </material>
+      </visual>
+      <collision>
+        <geometry>
+          <sphere radius="${caster_radius}"/>
+        </geometry>
+      </collision>
+      <inertial>
+        <mass value="0.1"/>
+        <inertia ixx="0.0001" ixy="0.0" ixz="0.0" iyy="0.0001" iyz="0.0" izz="0.0001"/>
+      </inertial>
+    </link>
+
+    <joint name="${prefix}_caster_joint" type="fixed">
+      <parent link="base_link"/>
+      <child link="${prefix}_caster"/>
+      <origin xyz="${x} ${y * flip} ${-wheel_radius + caster_radius}" rpy="0 0 0"/>
+    </joint>
+  </xacro:macro>
+
+  <!-- Caster wheels (front) -->
+  <xacro:caster prefix="left_front" x="${wheel_separation_length/2}" y="${wheel_separation_width/2}" flip="1"/>
+  <xacro:caster prefix="right_front" x="${wheel_separation_length/2}" y="${wheel_separation_width/2}" flip="-1"/>
+
+  <!-- LiDAR -->
+  <link name="laser">
+    <visual>
+      <geometry>
+        <cylinder radius="${lidar_radius}" length="${lidar_height}"/>
+      </geometry>
+      <material name="blue">
+        <color rgba="0.0 0.0 1.0 1.0"/>
+      </material>
+    </visual>
+    <collision>
+      <geometry>
+        <cylinder radius="${lidar_radius}" length="${lidar_height}"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="0.3"/>
+      <inertia ixx="0.001" ixy="0.0" ixz="0.0" iyy="0.001" iyz="0.0" izz="0.001"/>
+    </inertial>
+  </link>
+
+  <joint name="laser_joint" type="fixed">
+    <parent link="base_link"/>
+    <child link="laser"/>
+    <origin xyz="0 0 ${body_height/2 + lidar_height/2}" rpy="0 0 0"/>
+  </joint>
+
+</robot>

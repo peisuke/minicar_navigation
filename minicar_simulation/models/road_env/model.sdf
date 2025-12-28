@@ -1,0 +1,34 @@
+<?xml version="1.0"?>
+<sdf version="1.7">
+  <model name="road_env">
+    <static>true</static>
+
+    <link name="walls">
+      <collision name="collision">
+        <geometry>
+          <mesh>
+            <uri>model://road_env/meshes/walls.stl</uri>
+          </mesh>
+        </geometry>
+      </collision>
+
+      <visual name="visual">
+        <geometry>
+          <mesh>
+            <uri>model://road_env/meshes/walls.stl</uri>
+          </mesh>
+        </geometry>
+
+        <cast_shadows>false</cast_shadows>
+        <lighting>false</lighting>
+
+        <material>
+          <ambient>0.2 0.2 0.2 1</ambient>
+          <diffuse>0.3 0.3 0.3 1</diffuse>
+          <specular>0 0 0 1</specular>
+        </material>
+
+      </visual>
+    </link>
+  </model>
+</sdf>
