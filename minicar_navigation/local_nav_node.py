@@ -22,6 +22,7 @@ class LocalNavNode(Node):
         super().__init__("local_nav_node", automatically_declare_parameters_from_overrides=True)
 
         # パラメータはautomatically_declare_parameters_from_overridesで自動宣言される
+        self.declare_parameter("controller_type_override", "")
 
         # ---- Subscriber (LiDAR) ----
         self.scan_sub = self._setup_input_subscribers()
