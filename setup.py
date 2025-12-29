@@ -31,6 +31,7 @@ setup(
     entry_points={
         'console_scripts': [
             'local_nav = minicar_navigation.local_nav_node:main',
+            'param_server_node.py = minicar_navigation.param_server_node:main',
         ],
     },
 )

@@ -42,6 +42,18 @@ def generate_launch_description():
         ],
     )
 
+    # Parameter server node for dynamic parameter management
+    param_server_node = Node(
+        package="minicar_navigation",
+        executable="param_server_node.py",
+        name="param_server_node",
+        output="screen",
+        parameters=[{
+            "config_path": LaunchConfiguration("params_file"),
+            "target_node": "/local_nav_node",
+        }],
+    )
+
     return LaunchDescription([
         params_file,
         sim_ns, real_ns,
@@ -49,4 +61,5 @@ def generate_launch_description():
         output_sim, output_real,
         use_sim_time,
         local_nav_node,
+        param_server_node,
     ])
