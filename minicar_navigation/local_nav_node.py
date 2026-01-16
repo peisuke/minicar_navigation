@@ -311,12 +311,20 @@ class LocalNavNode(Node):
             return SetParametersResult(successful=True)
 
         # パラメータが適用された「後」に再初期化したいので遅延実行
+        # Note: create_timer(0.0, cb) は繰り返し発火するため、one-shot用にタイマーを自己破棄
         def apply():
             with self._ctrl_lock:
                 self._initialize_controller()
             self.get_logger().info("Controller re-initialized due to parameter update.")
+            # タイマーを破棄して一度だけ実行
+            if hasattr(self, '_param_update_timer') and self._param_update_timer:
+                self._param_update_timer.cancel()
+                self._param_update_timer = None
 
-        self.create_timer(0.0, apply)
+        # 既存のタイマーがあればキャンセル
+        if hasattr(self, '_param_update_timer') and self._param_update_timer:
+            self._param_update_timer.cancel()
+        self._param_update_timer = self.create_timer(0.01, apply)
         return SetParametersResult(successful=True)
 
 

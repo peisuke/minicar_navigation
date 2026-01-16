@@ -5,7 +5,7 @@ from .controller_factory import ControllerFactory
 
 __all__ = [
     'BaseController',
-    'PursuitController', 
+    'PursuitController',
     'PursuitControllerConfig',
     'PDPursuitController',
     'PDPursuitControllerConfig',

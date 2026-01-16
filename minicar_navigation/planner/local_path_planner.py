@@ -277,6 +277,7 @@ class PathPlannerConfig:
     DIST_THRESH: float = 15.0
     BORDER_THICKNESS: int = 1
     LOCAL_DIST_THRESH: float = 10.0
+    MAX_GRADIENT_DROP: float = 16.0  # エッジの距離場勾配の最大許容下降量(px) 0.08m / 0.005 = 16px
     
     # パス生成パラメータ
     START_IDS: Tuple[int, ...] = (0,)
@@ -835,21 +836,44 @@ class GraphPathSearcher:
         return (dist_mask & direction_mask)
     
     def _validate_edge_distances(self, flat_pts, src_id, dst_id, dist_map, cx, cy, thr):
-        """エッジの中点距離による検証"""
+        """エッジの中点距離および勾配による検証
+
+        検証条件:
+        1. エッジ中点の距離場値 >= 閾値（壁から十分離れている）
+        2. 距離場の勾配（終点-始点）>= -MAX_GRADIENT_DROP（壁に向かって急降下しない）
+        """
         if dist_map.size == 0:
             raise ValueError("Distance map is empty")
-        
-        mid = (flat_pts[src_id] + flat_pts[dst_id]) * 0.5
-        
+
         H, W = dist_map.shape[:2]
-        x = np.rint(mid[:, 0]).astype(np.int32)
-        y = np.rint(mid[:, 1]).astype(np.int32)
-        
-        # 安全な境界チェック
-        x_safe, y_safe = _validate_array_bounds(x + cx, y + cy, H, W)
-        
-        vals = dist_map[y_safe, x_safe]
-        return vals >= thr
+
+        # 中点の距離値チェック
+        mid = (flat_pts[src_id] + flat_pts[dst_id]) * 0.5
+        mid_x = np.rint(mid[:, 0]).astype(np.int32)
+        mid_y = np.rint(mid[:, 1]).astype(np.int32)
+        mid_x_safe, mid_y_safe = _validate_array_bounds(mid_x + cx, mid_y + cy, H, W)
+        mid_vals = dist_map[mid_y_safe, mid_x_safe]
+        midpoint_mask = mid_vals >= thr
+
+        # 始点と終点の距離値を取得
+        src_pts = flat_pts[src_id]
+        dst_pts = flat_pts[dst_id]
+
+        src_x = np.rint(src_pts[:, 0]).astype(np.int32)
+        src_y = np.rint(src_pts[:, 1]).astype(np.int32)
+        src_x_safe, src_y_safe = _validate_array_bounds(src_x + cx, src_y + cy, H, W)
+        src_vals = dist_map[src_y_safe, src_x_safe]
+
+        dst_x = np.rint(dst_pts[:, 0]).astype(np.int32)
+        dst_y = np.rint(dst_pts[:, 1]).astype(np.int32)
+        dst_x_safe, dst_y_safe = _validate_array_bounds(dst_x + cx, dst_y + cy, H, W)
+        dst_vals = dist_map[dst_y_safe, dst_x_safe]
+
+        # 勾配チェック: 終点 - 始点 >= -MAX_GRADIENT_DROP
+        gradient = dst_vals - src_vals
+        gradient_mask = gradient >= -self.config.MAX_GRADIENT_DROP
+
+        return midpoint_mask & gradient_mask
     
     def _validate_edge_directions(self, flat_pts, src_id, dst_id, front_deg):
         """エッジの方向による検証"""

@@ -21,15 +21,20 @@ class PDPursuitControllerConfig:
     """PD Pursuit Controllerの設定"""
     # Pure Pursuit パラメータ
     LOOKAHEAD_DISTANCE: float = 0.3  # Look-ahead距離 [m]
-    
+
     # 速度制御パラメータ
-    TARGET_VELOCITY: float = 0.3     # 目標速度 [m/s]
+    TARGET_VELOCITY: float = 0.3     # 最大目標速度 [m/s]
+    MIN_VELOCITY: float = 0.1        # 最小速度 [m/s]
     MAX_ANGULAR_VELOCITY: float = 1.0  # 最大角速度 [rad/s]
-    
+
     # PD制御パラメータ
     KP_ANGULAR: float = 2.0          # 角速度比例ゲイン
     KD_ANGULAR: float = 0.5          # 角速度微分ゲイン
-    
+
+    # 曲率に応じた速度調整
+    K_CURVATURE: float = 1.0         # 曲率感度（大きいほどカーブで減速）
+    CURVATURE_LOOKAHEAD: int = 10    # 曲率計算用の先読み点数
+
     # ゴール判定
     GOAL_TOLERANCE: float = 0.1      # ゴール到達判定距離 [m]
 
@@ -69,16 +74,19 @@ class PDPursuitController(BaseController):
             current_x, current_y, current_yaw = robot_state
         
         # Look-ahead点を見つける
-        target_point = self._find_lookahead_point(path, current_x, current_y)
-        
+        target_point, nearest_idx = self._find_lookahead_point(path, current_x, current_y)
+
         if target_point is None:
             return 0.0, 0.0
-        
+
+        # 曲率を計算
+        curvature = self._compute_curvature(path, nearest_idx)
+
         # PD Pure Pursuitアルゴリズムで制御コマンドを計算
         linear_vel, angular_vel = self._compute_pd_pure_pursuit(
-            target_point, current_x, current_y, current_yaw
+            target_point, current_x, current_y, current_yaw, curvature
         )
-        
+
         return linear_vel, angular_vel
         
     def is_goal_reached(self, path: np.ndarray, robot_state: Tuple[float, float, float] = None) -> bool:
@@ -112,72 +120,77 @@ class PDPursuitController(BaseController):
         self.prev_angle_error = 0.0
         self.prev_time = None
     
-    def _find_lookahead_point(self, path: np.ndarray, current_x: float, current_y: float) -> Optional[Tuple[float, float]]:
+    def _find_lookahead_point(self, path: np.ndarray, current_x: float, current_y: float) -> Tuple[Optional[Tuple[float, float]], int]:
         """
         Look-ahead距離に基づいて目標点を選択
-        
+
         Args:
             path: パス点群
             current_x, current_y: 現在位置
-            
+
         Returns:
-            目標点 (x, y) or None
+            (目標点 (x, y) or None, nearest_idx)
         """
         lookahead_dist = self.config.LOOKAHEAD_DISTANCE
-        
+
         # 現在位置から各パス点までの距離を計算
         distances = np.sqrt(
             (path[:, 0] - current_x) ** 2 + (path[:, 1] - current_y) ** 2
         )
-        
+
+        # 最近傍点のインデックス
+        nearest_idx = np.argmin(distances)
+
         # Look-ahead距離以上の点を探す
         valid_indices = np.where(distances >= lookahead_dist)[0]
-        
+
         if len(valid_indices) == 0:
             # Look-ahead距離内に点がない場合は最後の点を選択
-            return tuple(path[-1])
-        
+            return tuple(path[-1]), nearest_idx
+
         # 最初に見つかったLook-ahead距離以上の点を選択
         target_idx = valid_indices[0]
-        return tuple(path[target_idx])
+        return tuple(path[target_idx]), nearest_idx
     
-    def _compute_pd_pure_pursuit(self, target_point: Tuple[float, float], 
-                               current_x: float, current_y: float, current_yaw: float) -> Tuple[float, float]:
+    def _compute_pd_pure_pursuit(self, target_point: Tuple[float, float],
+                               current_x: float, current_y: float, current_yaw: float,
+                               curvature: float = 0.0) -> Tuple[float, float]:
         """
         PD制御を用いたPure Pursuitアルゴリズムによる制御計算
-        
+
         Args:
             target_point: 目標点 (x, y)
             current_x, current_y, current_yaw: 現在位置・姿勢
-            
+            curvature: 経路の曲率
+
         Returns:
             (linear_velocity, angular_velocity)
         """
         import time
-        
+
         target_x, target_y = target_point
-        
+
         # 目標点までの距離
         dx = target_x - current_x
         dy = target_y - current_y
         distance_to_target = math.sqrt(dx**2 + dy**2)
-        
+
         # ゴール近辺では停止
         if distance_to_target < self.config.GOAL_TOLERANCE:
             return 0.0, 0.0
-        
+
         # 目標点への角度（グローバル座標系）
         target_angle = math.atan2(dy, dx)
-        
+
         # ロボットの向きとの角度差
         angle_error = target_angle - current_yaw
-        
+
         # 角度を[-π, π]に正規化
         angle_error = math.atan2(math.sin(angle_error), math.cos(angle_error))
-        
+
         # PD制御による角速度計算
         current_time = time.time()
-        
+
         if self.prev_time is not None:
             dt = current_time - self.prev_time
             if dt > 0:
@@ -187,21 +200,67 @@ class PDPursuitController(BaseController):
                 angle_error_dot = 0.0
         else:
             angle_error_dot = 0.0
-        
+
         # PD制御
-        angular_vel = (self.config.KP_ANGULAR * angle_error + 
+        angular_vel = (self.config.KP_ANGULAR * angle_error +
                       self.config.KD_ANGULAR * angle_error_dot)
-        
+
         # 角速度制限
         angular_vel = max(-self.config.MAX_ANGULAR_VELOCITY,
                          min(self.config.MAX_ANGULAR_VELOCITY, angular_vel))
-        
-        # 線形速度の計算（角度差に応じて速度調整）
-        speed_factor = max(0.3, 1.0 - abs(angle_error) / math.pi)
-        linear_vel = self.config.TARGET_VELOCITY * speed_factor
-        
+
+        # 曲率に応じた速度調整
+        curvature_factor = 1.0 / (1.0 + self.config.K_CURVATURE * abs(curvature))
+
+        # 角度誤差による減速
+        heading_factor = max(0.5, 1.0 - abs(angle_error) / math.pi)
+
+        # 線形速度の計算
+        linear_vel = self.config.TARGET_VELOCITY * curvature_factor * heading_factor
+        linear_vel = max(self.config.MIN_VELOCITY, linear_vel)
+
         # 状態更新
         self.prev_angle_error = angle_error
         self.prev_time = current_time
-        
+
         return linear_vel, angular_vel
+
+    def _compute_curvature(self, path: np.ndarray, nearest_idx: int) -> float:
+        """
+        経路の局所的な曲率を計算
+
+        Returns:
+            曲率 [1/m]
+        """
+        lookahead = self.config.CURVATURE_LOOKAHEAD
+
+        idx1 = max(0, nearest_idx - lookahead // 2)
+        idx2 = nearest_idx
+        idx3 = min(len(path) - 1, nearest_idx + lookahead // 2)
+
+        if idx3 - idx1 < 2:
+            return 0.0
+
+        p1 = path[idx1]
+        p2 = path[idx2]
+        p3 = path[idx3]
+
+        v1 = p2 - p1
+        v2 = p3 - p2
+
+        len1 = np.linalg.norm(v1)
+        len2 = np.linalg.norm(v2)
+
+        if len1 < 1e-6 or len2 < 1e-6:
+            return 0.0
+
+        chord = np.linalg.norm(p3 - p1)
+        if chord < 1e-6:
+            return 0.0
+
+        cross = v1[0] * v2[1] - v1[1] * v2[0]
+        sin_theta = cross / (len1 * len2)
+
+        curvature = 2.0 * abs(sin_theta) / chord
+
+        return curvature
