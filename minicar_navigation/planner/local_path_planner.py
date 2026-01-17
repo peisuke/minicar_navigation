@@ -281,6 +281,10 @@ class PathPlannerConfig:
     
     # パス生成パラメータ
     START_IDS: Tuple[int, ...] = (0,)
+
+    # 方向バイアス（度）: 正=反時計回り（左寄り）、負=時計回り（右寄り）
+    # 例: -30.0 → 右に30度傾いた方向を「直進」として扱う
+    DIRECTION_BIAS_DEG: float = 0.0
     
     
     # パス平滑化パラメータ
@@ -695,7 +699,7 @@ class GraphPathSearcher:
             config: パスプランナー設定
         """
         self.config = config or PathPlannerConfig()
-        self.deduplicator = PathDeduplicator()
+        self.deduplicator = PathDeduplicator(self.config)
     
     def build_and_deduplicate_paths(self, labels: np.ndarray, centered_points: np.ndarray,
                                   dist_inside: np.ndarray, center_x: int, center_y: int,
@@ -1138,8 +1142,10 @@ class PathPipeline:
 # =============================
 class PathDeduplicator:
     """パス重複除去：無駄なパスの除去"""
-    
-    
+
+    def __init__(self, config: PathPlannerConfig = None):
+        self.config = config or PathPlannerConfig()
+
     def deduplicate_paths(self, paths_ids: List[List[int]], centered_pts: np.ndarray = None, flat_to_pts: np.ndarray = None) -> List[List[int]]:
         """
         パスの重複除去：冗長パスを除去 (高速版)
@@ -1310,35 +1316,38 @@ class PathDeduplicator:
         return [path for angle, path in path_angles]
     
     def _calculate_turning_angle(self, path_ids: List[int], centered_pts: np.ndarray, flat_to_pts: np.ndarray) -> float:
-        """現在の向き（ロボット前方=X軸正方向）と現在位置から最終ノードへの方向の角度差を計算"""
+        """現在の向き（ロボット前方=X軸正方向）と現在位置から最終ノードへの方向の角度差を計算
+
+        バイアスを考慮: DIRECTION_BIAS_DEG分だけ基準方向をずらす
+        例: バイアス=-30° → 右30°方向が「直進（角度差0）」として扱われる
+        """
         if len(path_ids) < 1:
             return 0.0
-        
+
         # 現在の位置（ロボット位置 = 原点）
         robot_pos = np.array([0.0, 0.0])
-        
+
         # 最終ノードの座標を取得
         final_node_pos = centered_pts[flat_to_pts[path_ids[-1]]]
-        
+
         # 現在位置から最終ノードへの方向ベクトル
         direction_to_final = final_node_pos - robot_pos
-        
-        # 現在の向き（ロボット前方 = X軸正方向）
-        current_direction = np.array([1.0, 0.0])
-        
-        # 角度差を計算
+
+        # パスの方向角度を計算
         angle = np.arctan2(direction_to_final[1], direction_to_final[0])
-        current_angle = np.arctan2(current_direction[1], current_direction[0])
-        
-        # 角度差（-πからπの範囲）
-        turning_angle = angle - current_angle
-        
+
+        # バイアスを適用した基準方向（度→ラジアン）
+        bias_rad = np.deg2rad(self.config.DIRECTION_BIAS_DEG)
+
+        # バイアスを考慮した角度差
+        turning_angle = angle - bias_rad
+
         # -πからπの範囲に正規化
         while turning_angle > np.pi:
             turning_angle -= 2 * np.pi
         while turning_angle < -np.pi:
             turning_angle += 2 * np.pi
-            
+
         return turning_angle
     
 

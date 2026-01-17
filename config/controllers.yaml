@@ -3,6 +3,12 @@ local_nav_node:
     # コントローラータイプ: "p", "pd"
     controller_type: "pd"
 
+    # プランナーパラメータ
+    planner:
+      # 方向バイアス（度）: 正=左寄り、負=右寄り
+      # 例: -30.0 → 右30°方向を「直進」として扱う（時計回り優先）
+      direction_bias_deg: 0.0
+
     # 共通パラメータ
     common:
       lookahead_distance: 0.2

@@ -24,6 +24,11 @@ class LocalNavNode(Node):
         # パラメータはautomatically_declare_parameters_from_overridesで自動宣言される
         self.declare_parameter("controller_type_override", "")
 
+        # プランナーパラメータを明示的に宣言（動的変更可能にするため）
+        # YAMLで既に宣言されている場合はスキップ
+        if not self.has_parameter("planner.direction_bias_deg"):
+            self.declare_parameter("planner.direction_bias_deg", 0.0)
+
         # ---- Subscriber (LiDAR) ----
         self.scan_sub = self._setup_input_subscribers()
 
@@ -47,7 +52,8 @@ class LocalNavNode(Node):
         self.latest_lidar_data = None  # {'ranges': np.ndarray, 'angles': np.ndarray}
 
         # プランナーとコントローラーの初期化
-        self.planner = local_path_planner.LocalPathPlanner()        
+        planner_config = self._create_planner_config()
+        self.planner = local_path_planner.LocalPathPlanner(config=planner_config)        
         
         self._ctrl_lock = threading.Lock()
         self.add_on_set_parameters_callback(self._on_parameters_updated)
@@ -261,11 +267,23 @@ class LocalNavNode(Node):
             params = self.get_parameters_by_prefix(prefix)
             for key, param in params.items():
                 param_dict[key] = param.value
-                    
+
         except Exception as e:
             self.get_logger().warn(f"Failed to get parameters with prefix '{prefix}': {e}")
-            
+
         return param_dict
+
+    def _create_planner_config(self) -> local_path_planner.PathPlannerConfig:
+        """プランナー設定を作成"""
+        planner_params = self._get_parameters_as_dict('planner')
+
+        direction_bias_deg = planner_params.get('direction_bias_deg', 0.0)
+
+        self.get_logger().info(f"Planner config: direction_bias_deg={direction_bias_deg:.1f}")
+
+        return local_path_planner.PathPlannerConfig(
+            DIRECTION_BIAS_DEG=direction_bias_deg
+        )
     
     def _log_controller_config(self, controller_type: str, params: dict):
         """コントローラー設定をログ出力"""
@@ -295,27 +313,36 @@ class LocalNavNode(Node):
             
     def _on_parameters_updated(self, params: list[Parameter]) -> SetParametersResult:
         """
-        パラメータ更新を検知して controller を再初期化する
-        ロジックは一切変更しない
+        パラメータ更新を検知して controller/planner を再初期化する
         """
 
-        # controller / common / controllers.* に関係ない変更は無視してOK
-        relevant = any(
+        # controller / common / controllers.* に関係する変更
+        controller_relevant = any(
             p.name == "controller_type"
             or p.name.startswith("common.")
             or p.name.startswith("controllers.")
             for p in params
         )
 
-        if not relevant:
+        # planner.* に関係する変更
+        planner_relevant = any(
+            p.name.startswith("planner.")
+            for p in params
+        )
+
+        if not controller_relevant and not planner_relevant:
             return SetParametersResult(successful=True)
 
         # パラメータが適用された「後」に再初期化したいので遅延実行
-        # Note: create_timer(0.0, cb) は繰り返し発火するため、one-shot用にタイマーを自己破棄
         def apply():
             with self._ctrl_lock:
-                self._initialize_controller()
-            self.get_logger().info("Controller re-initialized due to parameter update.")
+                if controller_relevant:
+                    self._initialize_controller()
+                    self.get_logger().info("Controller re-initialized due to parameter update.")
+                if planner_relevant:
+                    planner_config = self._create_planner_config()
+                    self.planner = local_path_planner.LocalPathPlanner(config=planner_config)
+                    self.get_logger().info("Planner re-initialized due to parameter update.")
             # タイマーを破棄して一度だけ実行
             if hasattr(self, '_param_update_timer') and self._param_update_timer:
                 self._param_update_timer.cancel()
