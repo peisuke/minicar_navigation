@@ -9,12 +9,12 @@ local_nav_node:
       # 例: -30.0 → 右30°方向を「直進」として扱う（時計回り優先）
       direction_bias_deg: 0.0
 
-    # 共通パラメータ
+    # 共通パラメータ (3倍スケール用)
     common:
-      lookahead_distance: 0.2
-      target_velocity: 0.3
-      max_angular_velocity: 1.5
-      goal_tolerance: 0.1
+      lookahead_distance: 1.0    # 0.2 * 3 = 0.6m
+      target_velocity: 1.5       # 実機で動作確認済みの値
+      max_angular_velocity: 3.0  # 1.5 * 2 = 3.0 (実機で旋回に必要)
+      goal_tolerance: 0.3        # 0.1 * 3 = 0.3m
 
     # コントローラー固有パラメータ
     controllers:
@@ -23,8 +23,8 @@ local_nav_node:
         dummy: 1
 
       pd:
-        kp_angular: 4.5
-        kd_angular: 0.8
+        kp_angular: 8.0          # 4.5 → 8.0 (実機で旋回強化)
+        kd_angular: 1.2          # 0.8 → 1.2
         k_curvature: 4.0
-        curvature_lookahead: 10
-        min_velocity: 0.08
+        curvature_lookahead: 20  # 10 * 2 = 20 (広い環境用)
+        min_velocity: 0.15       # 0.08 → 0.15 (実機のデッドゾーン対応)

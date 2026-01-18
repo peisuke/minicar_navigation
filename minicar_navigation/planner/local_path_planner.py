@@ -263,7 +263,7 @@ class PathPlannerConfig:
     WIDTH: int = 640
     
     # 地図解像度
-    MAP_RESOLUTION: float = 0.005  # meter/pixel
+    MAP_RESOLUTION: float = 0.015  # meter/pixel (実環境用: 0.005の3倍)
     
     # リングパラメータ
     RING_RADII: Tuple[int, ...] = (25, 50, 75, 100, 125, 150)
