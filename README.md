@@ -146,6 +146,60 @@ ros2 param set /local_nav_node common.target_velocity 0.5
 - `/{real_ns}/diff_drive_controller/cmd_vel_unstamped`: 速度指令 (geometry_msgs/Twist)
 - `/local_paths`: 計画経路の可視化 (nav_msgs/Path)
 
+## デバッグ・テストツール
+
+### debug_recorder
+
+センサデータと推論結果を記録します。
+
+```bash
+# シミュレーション用
+ros2 run minicar_navigation debug_recorder
+
+# 実機用（トピックリマップ）
+python3 ~/ros2_ws/src/minicar_navigation/minicar_navigation/debug_recorder.py \
+  --ros-args \
+  -r /sim_robot/scan:=/real_robot/scan \
+  -r /sim_robot/diff_drive_controller/odom:=/real_robot/diff_drive_controller/odom
+```
+
+出力先: `/tmp/debug_data/session_YYYYMMDD_HHMMSS/all_frames.json`
+
+### trajectory_logger
+
+ロボットの軌跡を記録します（batch_test.shから使用）。
+
+```bash
+ros2 run minicar_navigation trajectory_logger
+```
+
+### plot_debug_frame.py
+
+記録したデータを可視化します。
+
+```bash
+# 特定フレームを表示
+python3 ~/ros2_ws/src/minicar_navigation/scripts/plot_debug_frame.py <json_file> <frame_idx>
+
+# 画像として保存
+python3 ~/ros2_ws/src/minicar_navigation/scripts/plot_debug_frame.py data.json 50 -o frame50.png
+```
+
+### batch_test.sh
+
+複数シードでバッチテストを実行します。
+
+```bash
+# シード0-10でテスト
+./scripts/batch_test.sh 0 10
+```
+
+出力先: `/tmp/batch_test/`
+
+## スケール調整
+
+シミュレーションと実環境のスケールが異なる場合は、[docs/scale_adjustment.md](docs/scale_adjustment.md) を参照してください。
+
 ## 依存関係
 
 - ROS2 Humble以上

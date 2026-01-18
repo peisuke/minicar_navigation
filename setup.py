@@ -33,10 +33,8 @@ setup(
         'console_scripts': [
             'local_nav = minicar_navigation.local_nav_node:main',
             'param_server_node.py = minicar_navigation.param_server_node:main',
-            #'metrics_collector = minicar_navigation.benchmark.metrics_collector:main',
-            #'path_following_test = minicar_navigation.path_following_test:main',
-            #'debug_recorder = minicar_navigation.debug_recorder:main',
-            #'trajectory_logger = minicar_navigation.trajectory_logger:main',
+            'debug_recorder = minicar_navigation.debug_recorder:main',
+            'trajectory_logger = minicar_navigation.trajectory_logger:main',
         ],
     },
 )

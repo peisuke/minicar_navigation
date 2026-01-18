@@ -1,0 +1,177 @@
+#!/usr/bin/env python3
+"""
+Debug Data Recorder for Local Path Planner
+
+フレームごとのデータを記録してデバッグ用に保存
+"""
+
+import rclpy
+from rclpy.node import Node
+from sensor_msgs.msg import LaserScan
+from nav_msgs.msg import Odometry, Path
+from geometry_msgs.msg import Twist
+import json
+import time
+import os
+from datetime import datetime
+
+
+class DebugRecorder(Node):
+    def __init__(self):
+        super().__init__('debug_recorder')
+
+        # パラメータ
+        self.declare_parameter('output_dir', '/tmp/debug_data')
+        self.declare_parameter('max_frames', 1000)
+
+        self.output_dir = self.get_parameter('output_dir').get_parameter_value().string_value
+        self.max_frames = self.get_parameter('max_frames').get_parameter_value().integer_value
+
+        # 出力ディレクトリ作成
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        self.session_dir = os.path.join(self.output_dir, f'session_{timestamp}')
+        os.makedirs(self.session_dir, exist_ok=True)
+
+        # データ格納
+        self.frames = []
+        self.current_frame = {
+            'timestamp': None,
+            'scan': None,
+            'odom': None,
+            'local_path': None,
+            'cmd_vel': None
+        }
+        self.frame_count = 0
+        self.recording = True
+
+        # サブスクライバー
+        self.scan_sub = self.create_subscription(
+            LaserScan, '/sim_robot/scan', self.scan_callback, 10)
+        self.odom_sub = self.create_subscription(
+            Odometry, '/sim_robot/diff_drive_controller/odom', self.odom_callback, 10)
+        self.path_sub = self.create_subscription(
+            Path, '/local_paths', self.path_callback, 10)
+        self.cmd_vel_sub = self.create_subscription(
+            Twist, '/sim_robot/diff_drive_controller/cmd_vel_unstamped', self.cmd_vel_callback, 10)
+
+        # フレーム保存タイマー (10Hz)
+        self.timer = self.create_timer(0.1, self.save_frame)
+
+        self.get_logger().info(f'Debug Recorder started. Output: {self.session_dir}')
+        self.get_logger().info(f'Max frames: {self.max_frames}')
+
+    def scan_callback(self, msg: LaserScan):
+        self.current_frame['scan'] = {
+            'angle_min': msg.angle_min,
+            'angle_max': msg.angle_max,
+            'angle_increment': msg.angle_increment,
+            'ranges': list(msg.ranges),
+            'range_min': msg.range_min,
+            'range_max': msg.range_max
+        }
+
+    def odom_callback(self, msg: Odometry):
+        self.current_frame['odom'] = {
+            'position': {
+                'x': msg.pose.pose.position.x,
+                'y': msg.pose.pose.position.y,
+                'z': msg.pose.pose.position.z
+            },
+            'orientation': {
+                'x': msg.pose.pose.orientation.x,
+                'y': msg.pose.pose.orientation.y,
+                'z': msg.pose.pose.orientation.z,
+                'w': msg.pose.pose.orientation.w
+            },
+            'linear_velocity': {
+                'x': msg.twist.twist.linear.x,
+                'y': msg.twist.twist.linear.y
+            },
+            'angular_velocity': msg.twist.twist.angular.z
+        }
+
+    def path_callback(self, msg: Path):
+        poses = []
+        for pose in msg.poses:
+            poses.append({
+                'x': pose.pose.position.x,
+                'y': pose.pose.position.y
+            })
+        self.current_frame['local_path'] = {
+            'frame_id': msg.header.frame_id,
+            'poses': poses,
+            'num_points': len(poses)
+        }
+
+    def cmd_vel_callback(self, msg: Twist):
+        self.current_frame['cmd_vel'] = {
+            'linear_x': msg.linear.x,
+            'angular_z': msg.angular.z
+        }
+
+    def save_frame(self):
+        if not self.recording:
+            return
+
+        if self.frame_count >= self.max_frames:
+            self.recording = False
+            self.save_all_frames()
+            self.get_logger().info(f'Recording complete. {self.frame_count} frames saved.')
+            return
+
+        # フレームをコピーして保存
+        frame = {
+            'frame_id': self.frame_count,
+            'timestamp': time.time(),
+            'scan': self.current_frame['scan'],
+            'odom': self.current_frame['odom'],
+            'local_path': self.current_frame['local_path'],
+            'cmd_vel': self.current_frame['cmd_vel']
+        }
+        self.frames.append(frame)
+
+        # 進捗表示
+        if self.frame_count % 50 == 0:
+            self.get_logger().info(f'Recorded {self.frame_count} frames...')
+
+        self.frame_count += 1
+
+    def save_all_frames(self):
+        # 全フレームを1つのJSONファイルに保存
+        output_file = os.path.join(self.session_dir, 'all_frames.json')
+        with open(output_file, 'w') as f:
+            json.dump({
+                'total_frames': len(self.frames),
+                'frames': self.frames
+            }, f, indent=2)
+        self.get_logger().info(f'Saved to {output_file}')
+
+        # サマリー保存
+        summary_file = os.path.join(self.session_dir, 'summary.txt')
+        with open(summary_file, 'w') as f:
+            f.write(f'Total frames: {len(self.frames)}\n')
+            f.write(f'Duration: {self.frames[-1]["timestamp"] - self.frames[0]["timestamp"]:.2f}s\n')
+
+            # パス統計
+            path_counts = [f['local_path']['num_points'] if f['local_path'] else 0 for f in self.frames]
+            f.write(f'Path points (avg): {sum(path_counts)/len(path_counts):.1f}\n')
+
+        self.get_logger().info(f'Summary saved to {summary_file}')
+
+
+def main(args=None):
+    rclpy.init(args=args)
+    node = DebugRecorder()
+
+    try:
+        rclpy.spin(node)
+    except KeyboardInterrupt:
+        node.get_logger().info('Interrupted. Saving data...')
+        node.save_all_frames()
+    finally:
+        node.destroy_node()
+        rclpy.shutdown()
+
+
+if __name__ == '__main__':
+    main()
