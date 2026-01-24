@@ -2,6 +2,7 @@
 import os
 from launch import LaunchDescription
 from launch.actions import DeclareLaunchArgument
+from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
@@ -21,6 +22,7 @@ def generate_launch_description():
     output_sim = DeclareLaunchArgument("output_sim", default_value="true")
     output_real = DeclareLaunchArgument("output_real", default_value="false")
     use_sim_time = DeclareLaunchArgument("use_sim_time", default_value="false")
+    record = DeclareLaunchArgument("record", default_value="false")
 
     local_nav_node = Node(
         package="minicar_navigation",
@@ -54,12 +56,23 @@ def generate_launch_description():
         }],
     )
 
+    # Debug recorder node (conditional)
+    debug_recorder_node = Node(
+        package="minicar_navigation",
+        executable="debug_recorder",
+        name="debug_recorder",
+        output="screen",
+        condition=IfCondition(LaunchConfiguration("record")),
+    )
+
     return LaunchDescription([
         params_file,
         sim_ns, real_ns,
         input_sim, input_real,
         output_sim, output_real,
         use_sim_time,
+        record,
         local_nav_node,
         param_server_node,
+        debug_recorder_node,
     ])
