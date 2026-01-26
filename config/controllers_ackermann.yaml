@@ -1,0 +1,28 @@
+local_nav_node:
+  ros__parameters:
+    # コントローラータイプ: "p", "pd"
+    controller_type: "pd"
+
+    # プランナーパラメータ
+    planner:
+      # 方向バイアス（度）: 正=左寄り、負=右寄り
+      direction_bias_deg: -45.0  # 右回り優先
+
+    # 共通パラメータ (Ackermann用 v4 高速版)
+    common:
+      lookahead_distance: 1.8    # 高速用先読み
+      target_velocity: 2.5       # 安定高速
+      max_angular_velocity: 3.0  # 標準
+      goal_tolerance: 0.4        # v3と同じ
+
+    # コントローラー固有パラメータ
+    controllers:
+      p:
+        dummy: 1
+
+      pd:
+        kp_angular: 4.0          # v3: 4.5 → 4.0 (高速時の安定性)
+        kd_angular: 2.5          # v3: 2.0 → 2.5 (高速時の振動抑制)
+        k_curvature: 5.0         # v3: 4.0 → 5.0 (曲率で減速強化)
+        curvature_lookahead: 30  # v3: 25 → 30 (さらに先読み)
+        min_velocity: 0.3        # v3: 0.25 → 0.3
