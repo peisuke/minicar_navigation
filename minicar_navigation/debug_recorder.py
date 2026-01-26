@@ -23,9 +23,26 @@ class DebugRecorder(Node):
         # パラメータ
         self.declare_parameter('output_dir', '/tmp/debug_data')
         self.declare_parameter('max_frames', 1000)
+        self.declare_parameter('input_sim', True)
+        self.declare_parameter('input_real', False)
+        self.declare_parameter('sim_ns', 'sim_robot')
+        self.declare_parameter('real_ns', 'real_robot')
 
         self.output_dir = self.get_parameter('output_dir').get_parameter_value().string_value
         self.max_frames = self.get_parameter('max_frames').get_parameter_value().integer_value
+
+        # 名前空間の決定
+        input_sim = self.get_parameter('input_sim').get_parameter_value().bool_value
+        input_real = self.get_parameter('input_real').get_parameter_value().bool_value
+        sim_ns = self.get_parameter('sim_ns').get_parameter_value().string_value
+        real_ns = self.get_parameter('real_ns').get_parameter_value().string_value
+
+        if input_real:
+            self.ns = real_ns
+        elif input_sim:
+            self.ns = sim_ns
+        else:
+            self.ns = sim_ns  # fallback
 
         # 出力ディレクトリ作成
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
@@ -45,14 +62,20 @@ class DebugRecorder(Node):
         self.recording = True
 
         # サブスクライバー
+        scan_topic = f'/{self.ns}/scan'
+        odom_topic = f'/{self.ns}/diff_drive_controller/odom'
+        cmd_vel_topic = f'/{self.ns}/diff_drive_controller/cmd_vel_unstamped'
+
         self.scan_sub = self.create_subscription(
-            LaserScan, '/sim_robot/scan', self.scan_callback, 10)
+            LaserScan, scan_topic, self.scan_callback, 10)
         self.odom_sub = self.create_subscription(
-            Odometry, '/sim_robot/diff_drive_controller/odom', self.odom_callback, 10)
+            Odometry, odom_topic, self.odom_callback, 10)
         self.path_sub = self.create_subscription(
             Path, '/local_paths', self.path_callback, 10)
         self.cmd_vel_sub = self.create_subscription(
-            Twist, '/sim_robot/diff_drive_controller/cmd_vel_unstamped', self.cmd_vel_callback, 10)
+            Twist, cmd_vel_topic, self.cmd_vel_callback, 10)
+
+        self.get_logger().info(f'Subscribing to: {scan_topic}, {odom_topic}, {cmd_vel_topic}')
 
         # フレーム保存タイマー (10Hz)
         self.timer = self.create_timer(0.1, self.save_frame)

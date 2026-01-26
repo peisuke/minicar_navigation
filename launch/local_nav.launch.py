@@ -23,6 +23,11 @@ def generate_launch_description():
     output_real = DeclareLaunchArgument("output_real", default_value="false")
     use_sim_time = DeclareLaunchArgument("use_sim_time", default_value="false")
     record = DeclareLaunchArgument("record", default_value="false")
+    robot_type = DeclareLaunchArgument(
+        "robot_type",
+        default_value="diff",
+        description="Robot type: 'diff' for diff_drive or 'ackermann' for ackermann steering"
+    )
 
     local_nav_node = Node(
         package="minicar_navigation",
@@ -40,6 +45,7 @@ def generate_launch_description():
                 "output_sim": LaunchConfiguration("output_sim"),
                 "output_real": LaunchConfiguration("output_real"),
                 "use_sim_time": LaunchConfiguration("use_sim_time"),
+                "robot_type": LaunchConfiguration("robot_type"),
             },
         ],
     )
@@ -63,6 +69,12 @@ def generate_launch_description():
         name="debug_recorder",
         output="screen",
         condition=IfCondition(LaunchConfiguration("record")),
+        parameters=[{
+            "input_sim": LaunchConfiguration("input_sim"),
+            "input_real": LaunchConfiguration("input_real"),
+            "sim_ns": LaunchConfiguration("sim_ns"),
+            "real_ns": LaunchConfiguration("real_ns"),
+        }],
     )
 
     return LaunchDescription([
@@ -72,6 +84,7 @@ def generate_launch_description():
         output_sim, output_real,
         use_sim_time,
         record,
+        robot_type,
         local_nav_node,
         param_server_node,
         debug_recorder_node,

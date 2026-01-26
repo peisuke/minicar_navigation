@@ -24,6 +24,10 @@ class LocalNavNode(Node):
         # パラメータはautomatically_declare_parameters_from_overridesで自動宣言される
         self.declare_parameter("controller_type_override", "")
 
+        # robot_type: diff or ackermann (デフォルト: diff)
+        if not self.has_parameter("robot_type"):
+            self.declare_parameter("robot_type", "diff")
+
         # プランナーパラメータを明示的に宣言（動的変更可能にするため）
         # YAMLで既に宣言されている場合はスキップ
         if not self.has_parameter("planner.direction_bias_deg"):
@@ -208,22 +212,31 @@ class LocalNavNode(Node):
         output_real = self.get_parameter('output_real').get_parameter_value().bool_value
         sim_ns = self.get_parameter('sim_ns').get_parameter_value().string_value
         real_ns = self.get_parameter('real_ns').get_parameter_value().string_value
-        
+
+        # Get robot type (diff or ackermann)
+        robot_type = self.get_parameter('robot_type').get_parameter_value().string_value
+
+        # Determine topic suffix based on robot type
+        if robot_type == "ackermann":
+            topic_suffix = "ackermann_steering_controller/reference_unstamped"
+        else:
+            topic_suffix = "diff_drive_controller/cmd_vel_unstamped"
+
         publishers = {}
-        
+
         if output_sim:
-            sim_topic = f"/{sim_ns}/diff_drive_controller/cmd_vel_unstamped"
+            sim_topic = f"/{sim_ns}/{topic_suffix}"
             publishers['sim'] = self.create_publisher(Twist, sim_topic, 10)
-            self.get_logger().info(f"Publishing to sim robot: {sim_topic}")
-            
+            self.get_logger().info(f"Publishing to sim robot ({robot_type}): {sim_topic}")
+
         if output_real:
-            real_topic = f"/{real_ns}/diff_drive_controller/cmd_vel_unstamped"
+            real_topic = f"/{real_ns}/{topic_suffix}"
             publishers['real'] = self.create_publisher(Twist, real_topic, 10)
-            self.get_logger().info(f"Publishing to real robot: {real_topic}")
-            
+            self.get_logger().info(f"Publishing to real robot ({robot_type}): {real_topic}")
+
         if not publishers:
             self.get_logger().warn("No output publishers configured!")
-            
+
         return publishers
     
     def _publish_cmd_vel(self, cmd_msg):
