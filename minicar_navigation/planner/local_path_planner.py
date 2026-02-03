@@ -1576,7 +1576,7 @@ class LocalPathPlanner:
         self.path_pipeline = PathPipeline(config=self.config)
 
         # Belief state for path selection (persists across frames)
-        self._belief_direction = np.array([1.0, 0.0], dtype=np.float32)
+        self._belief_direction = np.array([1.0, 0.0], dtype=np.float32)  # 初期: 前方
         self._belief_initialized = False
 
     def generate_local_paths(self, last_lidar_data: Dict[str, Any]) -> List[np.ndarray]:
@@ -1728,16 +1728,32 @@ class LocalPathPlanner:
         return float(np.dot(self._belief_direction, path_direction))
 
     def _score_path(self, path: np.ndarray) -> Tuple[float, float, float]:
-        """confidence + weight × consistency で総合スコアを算出（加算式）。"""
-        confidence = self._calculate_path_confidence(path)
+        """confidence + weight × (consistency + bias) で総合スコアを算出。
 
-        if not self._belief_initialized:
+        - consistency: 信念方向との一致度（過去の選択との連続性）
+        - bias: DIRECTION_BIAS_DEG方向との一致度（優先方向）
+        """
+        confidence = self._calculate_path_confidence(path)
+        path_direction = self._extract_path_direction(path)
+
+        if path_direction is None:
             return (confidence, confidence, 0.0)
 
-        path_direction = self._extract_path_direction(path)
+        # バイアス方向との一致度
+        bias_rad = np.deg2rad(self.config.DIRECTION_BIAS_DEG)
+        bias_direction = np.array([np.cos(bias_rad), np.sin(bias_rad)], dtype=np.float32)
+        bias_preference = float(np.dot(bias_direction, path_direction))
+
+        if not self._belief_initialized:
+            # 初期化前はバイアスのみ使用
+            score = confidence + self.config.BELIEF_CONSISTENCY_WEIGHT * bias_preference
+            return (score, confidence, bias_preference)
+
+        # 信念との一致度 + バイアス
         consistency = self._calculate_consistency(path_direction)
-        score = confidence + self.config.BELIEF_CONSISTENCY_WEIGHT * consistency
-        return (score, confidence, consistency)
+        combined = (consistency + bias_preference) / 2.0
+        score = confidence + self.config.BELIEF_CONSISTENCY_WEIGHT * combined
+        return (score, confidence, combined)
 
     def _update_belief(self, selected_path: np.ndarray, confidence: float):
         """選択パスの方向でEMA更新。高信頼パスほど大きく信念を動かす。"""
