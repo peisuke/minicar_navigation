@@ -54,7 +54,7 @@ def run_ros2_command(cmd_args, env, **kwargs):
     )
 
 
-def run_simulation(seed: int, duration: int = 60, gui: bool = False) -> dict:
+def run_simulation(seed: int, duration: int = 60, gui: bool = False, record_scan: bool = False) -> dict:
     """シミュレーションを実行して結果を返す"""
 
     result = {
@@ -101,7 +101,7 @@ def run_simulation(seed: int, duration: int = 60, gui: bool = False) -> dict:
             'ros2', 'launch', 'minicar_navigation', 'local_nav.launch.py',
             'input_sim:=true', 'output_sim:=true',
             'input_real:=false', 'output_real:=false',
-            'record:=true', 'record_scan:=false', 'robot_type:=ackermann',
+            'record:=true', f'record_scan:={"true" if record_scan else "false"}', 'robot_type:=ackermann',
             f'max_frames:={max_frames}'
         ]
         nav_process = run_ros2_command(
@@ -262,6 +262,8 @@ def main():
                        help='Duration per seed in seconds')
     parser.add_argument('--gui', action='store_true',
                        help='Show GUI')
+    parser.add_argument('--record-scan', action='store_true',
+                       help='Record scan data (larger files)')
     args = parser.parse_args()
 
     seeds = [int(s.strip()) for s in args.seeds.split(',')]
@@ -270,6 +272,7 @@ def main():
     print(f"Seeds: {seeds}")
     print(f"Duration: {args.duration}s per seed")
     print(f"GUI: {args.gui}")
+    print(f"Record scan: {args.record_scan}")
 
     # 開始前にクリーンアップ
     print("Cleaning up any existing processes...")
@@ -279,7 +282,7 @@ def main():
     results = []
 
     for seed in seeds:
-        result = run_simulation(seed, args.duration, args.gui)
+        result = run_simulation(seed, args.duration, args.gui, args.record_scan)
 
         if result['debug_dir']:
             analysis = analyze_session(result['debug_dir'])
