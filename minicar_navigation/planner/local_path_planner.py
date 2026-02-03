@@ -292,7 +292,7 @@ class PathPlannerConfig:
     BELIEF_EMA_ALPHA: float = 0.3             # 信念更新の指数移動平均係数 (0=更新なし, 1=即時置換)
     BELIEF_CONFIDENCE_LENGTH_SCALE: float = 2.0  # 信頼度算出のパス長スケール(m)
     BELIEF_MIN_CONFIDENCE: float = 0.1         # 最低信頼度閾値（未満のパスは選択候補外）
-    BELIEF_CONSISTENCY_WEIGHT: float = 0.5     # スコア中の一貫性重み
+    BELIEF_CONSISTENCY_WEIGHT: float = 1.0     # スコア中の一貫性重み（加算式）
 
     # パス平滑化パラメータ
     CONTROL_STRENGTH_FACTOR: float = 3.0  # エルミート補間の制御点強度係数
@@ -1728,7 +1728,7 @@ class LocalPathPlanner:
         return float(np.dot(self._belief_direction, path_direction))
 
     def _score_path(self, path: np.ndarray) -> Tuple[float, float, float]:
-        """confidence × (1 + weight × consistency) で総合スコアを算出。"""
+        """confidence + weight × consistency で総合スコアを算出（加算式）。"""
         confidence = self._calculate_path_confidence(path)
 
         if not self._belief_initialized:
@@ -1736,7 +1736,7 @@ class LocalPathPlanner:
 
         path_direction = self._extract_path_direction(path)
         consistency = self._calculate_consistency(path_direction)
-        score = confidence * (1.0 + self.config.BELIEF_CONSISTENCY_WEIGHT * consistency)
+        score = confidence + self.config.BELIEF_CONSISTENCY_WEIGHT * consistency
         return (score, confidence, consistency)
 
     def _update_belief(self, selected_path: np.ndarray, confidence: float):
