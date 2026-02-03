@@ -27,6 +27,7 @@ class DebugRecorder(Node):
         self.declare_parameter('input_real', False)
         self.declare_parameter('sim_ns', 'sim_robot')
         self.declare_parameter('real_ns', 'real_robot')
+        self.declare_parameter('robot_type', 'diff')
 
         self.output_dir = self.get_parameter('output_dir').get_parameter_value().string_value
         self.max_frames = self.get_parameter('max_frames').get_parameter_value().integer_value
@@ -61,10 +62,21 @@ class DebugRecorder(Node):
         self.frame_count = 0
         self.recording = True
 
+        # robot_typeに応じたtopic名
+        robot_type = self.get_parameter('robot_type').get_parameter_value().string_value
+        if robot_type == 'ackermann':
+            controller_prefix = 'ackermann_steering_controller'
+            odom_suffix = 'odometry'
+            cmd_vel_suffix = 'reference_unstamped'
+        else:
+            controller_prefix = 'diff_drive_controller'
+            odom_suffix = 'odom'
+            cmd_vel_suffix = 'cmd_vel_unstamped'
+
         # サブスクライバー
         scan_topic = f'/{self.ns}/scan'
-        odom_topic = f'/{self.ns}/diff_drive_controller/odom'
-        cmd_vel_topic = f'/{self.ns}/diff_drive_controller/cmd_vel_unstamped'
+        odom_topic = f'/{self.ns}/{controller_prefix}/{odom_suffix}'
+        cmd_vel_topic = f'/{self.ns}/{controller_prefix}/{cmd_vel_suffix}'
 
         self.scan_sub = self.create_subscription(
             LaserScan, scan_topic, self.scan_callback, 10)

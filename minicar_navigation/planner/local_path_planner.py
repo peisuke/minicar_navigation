@@ -278,6 +278,8 @@ class PathPlannerConfig:
     BORDER_THICKNESS: int = 1
     LOCAL_DIST_THRESH: float = 10.0
     MAX_GRADIENT_DROP: float = 16.0  # エッジの距離場勾配の最大許容下降量(px) 0.08m / 0.005 = 16px
+    LOOKAHEAD_ALPHA: float = 1.0     # パス末端ルックアヘッド係数（末端エッジ長の何倍先を見るか）
+    MIN_PATH_NODES: int = 3          # ルックアヘッド刈り込み後の最小ノード数（未満のパスは棄却）
     
     # パス生成パラメータ
     START_IDS: Tuple[int, ...] = (0,)
@@ -722,14 +724,71 @@ class GraphPathSearcher:
         deduplicated_paths_ids = self.deduplicator.deduplicate_paths(
             paths_ids, centered_points, result_paths["flat_to_pts"]
         )
-        
-        # 3. ID→座標変換
-        deduplicated_paths_coords = self._paths_to_coords(
-            deduplicated_paths_ids, centered_points, result_paths["flat_to_pts"]
+
+        # 3. パス末端ルックアヘッド刈り込み
+        trimmed_paths_ids = self._trim_paths_by_lookahead(
+            deduplicated_paths_ids, centered_points, result_paths["flat_to_pts"],
+            dist_inside, center_x, center_y, dist_thresh
         )
-        
+
+        # 4. ID→座標変換
+        deduplicated_paths_coords = self._paths_to_coords(
+            trimmed_paths_ids, centered_points, result_paths["flat_to_pts"]
+        )
+
         return deduplicated_paths_coords
     
+    def _trim_paths_by_lookahead(self, paths_ids: List[List[int]], centered_pts: np.ndarray,
+                                flat_to_pts: np.ndarray, dist_map: np.ndarray,
+                                cx: int, cy: int, thr: float) -> List[List[int]]:
+        """パス末端からルックアヘッドで壁方向ノードを刈り込む
+
+        A->B->C->Dのパスで、C->Dの延長先が壁ならDを削除。
+        削除後のA->B->Cでも、B->Cの延長先が壁ならCを削除。
+        最終的にMIN_PATH_NODES未満になったパスは棄却する。
+        """
+        if not paths_ids:
+            return []
+
+        H, W = dist_map.shape[:2]
+        alpha = self.config.LOOKAHEAD_ALPHA
+        max_drop = self.config.MAX_GRADIENT_DROP
+        min_nodes = self.config.MIN_PATH_NODES
+        trimmed = []
+
+        for path in paths_ids:
+            path = list(path)
+
+            while len(path) >= 2:
+                # 末端エッジ: path[-2] -> path[-1]
+                src_idx = flat_to_pts[path[-2]]
+                dst_idx = flat_to_pts[path[-1]]
+                src_pt = centered_pts[src_idx].astype(float)
+                dst_pt = centered_pts[dst_idx].astype(float)
+                edge_vec = dst_pt - src_pt
+
+                # ルックアヘッド地点
+                la = dst_pt + alpha * edge_vec
+                la_x = np.clip(int(np.rint(la[0])) + cx, 0, W - 1)
+                la_y = np.clip(int(np.rint(la[1])) + cy, 0, H - 1)
+                la_val = dist_map[la_y, la_x]
+
+                # dst地点の距離値
+                dst_x = np.clip(int(np.rint(dst_pt[0])) + cx, 0, W - 1)
+                dst_y = np.clip(int(np.rint(dst_pt[1])) + cy, 0, H - 1)
+                dst_val = dist_map[dst_y, dst_x]
+
+                # 勾配チェック: 延長先で距離値が大きく下がるなら末端を削除
+                gradient = la_val - dst_val
+                if gradient >= -max_drop:
+                    break  # 壁に向かっていない→刈り込み終了
+                path.pop()
+
+            if len(path) >= min_nodes:
+                trimmed.append(path)
+
+        return trimmed
+
     def _paths_to_coords(self, paths_ids: List[List[int]], centered_pts: np.ndarray, flat_to_pts: np.ndarray):
         """パスIDを座標に変換するプライベートメソッド"""
         coordinate_paths = []
@@ -830,13 +889,13 @@ class GraphPathSearcher:
     def _validate_edges(self, graph_data, dist_map, cx, cy, thr, front_deg):
         """エッジの有効性を検証"""
         src_id, dst_id, flat_pts = graph_data['src_id'], graph_data['dst_id'], graph_data['flat_pts']
-        
+
         # 距離による検証
         dist_mask = self._validate_edge_distances(flat_pts, src_id, dst_id, dist_map, cx, cy, thr)
-        
+
         # 方向による検証
         direction_mask = self._validate_edge_directions(flat_pts, src_id, dst_id, front_deg)
-        
+
         return (dist_mask & direction_mask)
     
     def _validate_edge_distances(self, flat_pts, src_id, dst_id, dist_map, cx, cy, thr):
@@ -1380,7 +1439,7 @@ class PotentialPathSmoother:
         start_pos = np.array([0.0, 0.0])  # centered coordinates
         # ロボットの現在の向き（画面座標系では前方=X軸正方向）
         current_direction = np.array([1.0, 0.0])  # 前方向
-        
+
         for path in paths_coords:
             if len(path) > 2:
                 smoothed_path = self._parameter_free_path_optimization(
@@ -1389,7 +1448,7 @@ class PotentialPathSmoother:
                 smoothed_paths.append(smoothed_path)
             else:
                 smoothed_paths.append(path)
-                
+
         return smoothed_paths
     
     

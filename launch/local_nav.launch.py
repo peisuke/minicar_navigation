@@ -74,6 +74,7 @@ def generate_launch_description():
             "input_real": LaunchConfiguration("input_real"),
             "sim_ns": LaunchConfiguration("sim_ns"),
             "real_ns": LaunchConfiguration("real_ns"),
+            "robot_type": LaunchConfiguration("robot_type"),
         }],
     )
 
