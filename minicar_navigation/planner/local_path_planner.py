@@ -287,8 +287,13 @@ class PathPlannerConfig:
     # 方向バイアス（度）: 正=反時計回り（左寄り）、負=時計回り（右寄り）
     # 例: -30.0 → 右に30度傾いた方向を「直進」として扱う
     DIRECTION_BIAS_DEG: float = 0.0
-    
-    
+
+    # Belief-based path selection パラメータ
+    BELIEF_EMA_ALPHA: float = 0.3             # 信念更新の指数移動平均係数 (0=更新なし, 1=即時置換)
+    BELIEF_CONFIDENCE_LENGTH_SCALE: float = 2.0  # 信頼度算出のパス長スケール(m)
+    BELIEF_MIN_CONFIDENCE: float = 0.1         # 最低信頼度閾値（未満のパスは選択候補外）
+    BELIEF_CONSISTENCY_WEIGHT: float = 0.5     # スコア中の一貫性重み
+
     # パス平滑化パラメータ
     CONTROL_STRENGTH_FACTOR: float = 3.0  # エルミート補間の制御点強度係数
     AUTO_WEIGHT_DISTANCE_FACTOR: float = 15.0  # 自動ブレンドの距離重み係数
@@ -1569,7 +1574,11 @@ class LocalPathPlanner:
         """        
         self.config = config or PathPlannerConfig()
         self.path_pipeline = PathPipeline(config=self.config)
-       
+
+        # Belief state for path selection (persists across frames)
+        self._belief_direction = np.array([1.0, 0.0], dtype=np.float32)
+        self._belief_initialized = False
+
     def generate_local_paths(self, last_lidar_data: Dict[str, Any]) -> List[np.ndarray]:
         """ローカルパス生成（公開API）
         
@@ -1653,24 +1662,100 @@ class LocalPathPlanner:
         return vp.astype(np.int32)
     
     def select_outermost_path(self, paths: List[np.ndarray]) -> Tuple[np.ndarray, int]:
-        """パス選択ビジネスロジック（最も外側のパスを選択）
-        
-        ビジネスルール: 最も直進に近いパスを選択し、効率的な移動を実現
-        
+        """Belief-based path selection.
+
+        各パスを信頼度×信念一貫性でスコアリングし、最高スコアを選択。
+        選択後に信念方向をEMA更新する。パスが0本なら信念を維持。
+
         Args:
-            paths: ローカルパス配列のリスト（既にソート済み）
-            
+            paths: ローカルパス配列のリスト
+
         Returns:
             (選択されたパス, インデックス)
         """
         if not paths:
             return np.array([]), -1
-            
-        # 最後のパスが最も外側（直進に近い）
-        outermost_idx = len(paths) - 1
-        selected_path = paths[outermost_idx]
-        
-        return selected_path, outermost_idx
+
+        # 全パスをスコアリング
+        candidates = []
+        for idx, path in enumerate(paths):
+            score, confidence, _ = self._score_path(path)
+            if confidence >= self.config.BELIEF_MIN_CONFIDENCE:
+                candidates.append((score, confidence, idx))
+
+        if not candidates:
+            return np.array([]), -1
+
+        # 最高スコアのパスを選択
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        _, best_confidence, best_idx = candidates[0]
+        best_path = paths[best_idx]
+
+        # 信念更新
+        self._update_belief(best_path, best_confidence)
+
+        return best_path, best_idx
+
+    def _calculate_path_confidence(self, path: np.ndarray) -> float:
+        """パスの物理長から信頼度(0~1)を算出。長いパスほど高信頼。"""
+        if len(path) == 0:
+            return 0.0
+
+        if len(path) > 1:
+            diffs = np.diff(path, axis=0)
+            physical_length = float(np.sum(np.linalg.norm(diffs, axis=1)))
+        else:
+            physical_length = float(np.linalg.norm(path[0]))
+
+        return float(np.tanh(physical_length / self.config.BELIEF_CONFIDENCE_LENGTH_SCALE))
+
+    def _extract_path_direction(self, path: np.ndarray) -> np.ndarray:
+        """パス終点方向の単位ベクトルを取得。"""
+        if len(path) == 0:
+            return None
+
+        endpoint = path[-1]
+        dist = np.linalg.norm(endpoint)
+        if dist < 1e-6:
+            return None
+
+        return (endpoint / dist).astype(np.float32)
+
+    def _calculate_consistency(self, path_direction: np.ndarray) -> float:
+        """信念方向との余弦類似度(-1~1)を算出。"""
+        if path_direction is None:
+            return 0.0
+        return float(np.dot(self._belief_direction, path_direction))
+
+    def _score_path(self, path: np.ndarray) -> Tuple[float, float, float]:
+        """confidence × (1 + weight × consistency) で総合スコアを算出。"""
+        confidence = self._calculate_path_confidence(path)
+
+        if not self._belief_initialized:
+            return (confidence, confidence, 0.0)
+
+        path_direction = self._extract_path_direction(path)
+        consistency = self._calculate_consistency(path_direction)
+        score = confidence * (1.0 + self.config.BELIEF_CONSISTENCY_WEIGHT * consistency)
+        return (score, confidence, consistency)
+
+    def _update_belief(self, selected_path: np.ndarray, confidence: float):
+        """選択パスの方向でEMA更新。高信頼パスほど大きく信念を動かす。"""
+        if len(selected_path) == 0:
+            return
+
+        path_direction = self._extract_path_direction(selected_path)
+        if path_direction is None:
+            return
+
+        effective_alpha = self.config.BELIEF_EMA_ALPHA * confidence
+        new_belief = (1.0 - effective_alpha) * self._belief_direction + effective_alpha * path_direction
+
+        belief_norm = np.linalg.norm(new_belief)
+        if belief_norm > 1e-6:
+            self._belief_direction = (new_belief / belief_norm).astype(np.float32)
+
+        self._belief_initialized = True
 
 
 def main():
