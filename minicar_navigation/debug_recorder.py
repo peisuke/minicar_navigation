@@ -28,9 +28,11 @@ class DebugRecorder(Node):
         self.declare_parameter('sim_ns', 'sim_robot')
         self.declare_parameter('real_ns', 'real_robot')
         self.declare_parameter('robot_type', 'diff')
+        self.declare_parameter('record_scan', False)  # LiDARデータを記録するか（容量大）
 
         self.output_dir = self.get_parameter('output_dir').get_parameter_value().string_value
         self.max_frames = self.get_parameter('max_frames').get_parameter_value().integer_value
+        self.record_scan = self.get_parameter('record_scan').get_parameter_value().bool_value
 
         # 名前空間の決定
         input_sim = self.get_parameter('input_sim').get_parameter_value().bool_value
@@ -93,7 +95,7 @@ class DebugRecorder(Node):
         self.timer = self.create_timer(0.1, self.save_frame)
 
         self.get_logger().info(f'Debug Recorder started. Output: {self.session_dir}')
-        self.get_logger().info(f'Max frames: {self.max_frames}')
+        self.get_logger().info(f'Max frames: {self.max_frames}, Record scan: {self.record_scan}')
 
     def scan_callback(self, msg: LaserScan):
         self.current_frame['scan'] = {
@@ -158,7 +160,7 @@ class DebugRecorder(Node):
         frame = {
             'frame_id': self.frame_count,
             'timestamp': time.time(),
-            'scan': self.current_frame['scan'],
+            'scan': self.current_frame['scan'] if self.record_scan else None,
             'odom': self.current_frame['odom'],
             'local_path': self.current_frame['local_path'],
             'cmd_vel': self.current_frame['cmd_vel']
