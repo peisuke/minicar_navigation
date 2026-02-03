@@ -292,7 +292,7 @@ class PathPlannerConfig:
     BELIEF_EMA_ALPHA: float = 0.3             # 信念更新の指数移動平均係数 (0=更新なし, 1=即時置換)
     BELIEF_CONFIDENCE_LENGTH_SCALE: float = 2.0  # 信頼度算出のパス長スケール(m)
     BELIEF_MIN_CONFIDENCE: float = 0.1         # 最低信頼度閾値（未満のパスは選択候補外）
-    BELIEF_CONSISTENCY_WEIGHT: float = 1.0     # スコア中の一貫性重み（加算式）
+    BELIEF_CONSISTENCY_WEIGHT: float = 2.0     # スコア中の一貫性重み（加算式）
 
     # パス平滑化パラメータ
     CONTROL_STRENGTH_FACTOR: float = 3.0  # エルミート補間の制御点強度係数
