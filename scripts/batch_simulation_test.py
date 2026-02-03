@@ -48,16 +48,19 @@ def run_simulation(seed: int, duration: int = 60, gui: bool = False) -> dict:
             preexec_fn=os.setsid
         )
 
-        # シミュレーション起動待ち
+        # シミュレーション起動待ち（Gazeboの初期化に時間がかかる）
         print(f"Seed {seed}: Waiting for simulation to start...")
-        time.sleep(10)
+        time.sleep(20)
 
         # ナビゲーション起動（record_scan:=falseで軽量記録）
+        # max_frames = duration * 10Hz で自動保存させる
+        max_frames = duration * 10
         nav_cmd = [
             'ros2', 'launch', 'minicar_navigation', 'local_nav.launch.py',
             'input_sim:=true', 'output_sim:=true',
             'input_real:=false', 'output_real:=false',
-            'record:=true', 'record_scan:=false', 'robot_type:=ackermann'
+            'record:=true', 'record_scan:=false', 'robot_type:=ackermann',
+            f'max_frames:={max_frames}'
         ]
         nav_process = subprocess.Popen(
             nav_cmd,
@@ -66,8 +69,9 @@ def run_simulation(seed: int, duration: int = 60, gui: bool = False) -> dict:
             preexec_fn=os.setsid
         )
 
-        print(f"Seed {seed}: Running for {duration} seconds...")
-        time.sleep(duration)
+        print(f"Seed {seed}: Running for {duration} seconds (max_frames={max_frames})...")
+        # max_frames到達+保存完了まで少し余裕を持って待つ
+        time.sleep(duration + 5)
 
         result['success'] = True
 
@@ -76,22 +80,30 @@ def run_simulation(seed: int, duration: int = 60, gui: bool = False) -> dict:
         print(f"Seed {seed}: Error - {e}")
 
     finally:
-        # プロセス終了
+        # プロセス終了（データ保存のため十分な時間を確保）
         print(f"Seed {seed}: Stopping processes...")
 
         if nav_process:
             try:
                 os.killpg(os.getpgid(nav_process.pid), signal.SIGINT)
-                nav_process.wait(timeout=10)
-            except:
-                os.killpg(os.getpgid(nav_process.pid), signal.SIGKILL)
+                nav_process.wait(timeout=15)  # データ保存時間を確保
+            except Exception:
+                try:
+                    os.killpg(os.getpgid(nav_process.pid), signal.SIGKILL)
+                except Exception:
+                    pass
+
+        time.sleep(2)  # ファイル書き込み完了を待つ
 
         if sim_process:
             try:
                 os.killpg(os.getpgid(sim_process.pid), signal.SIGINT)
                 sim_process.wait(timeout=10)
-            except:
-                os.killpg(os.getpgid(sim_process.pid), signal.SIGKILL)
+            except Exception:
+                try:
+                    os.killpg(os.getpgid(sim_process.pid), signal.SIGKILL)
+                except Exception:
+                    pass
 
         time.sleep(3)
 
@@ -115,15 +127,21 @@ def analyze_session(session_dir: str) -> dict:
         'jump_frames': [],
         'avg_path_length': 0,
         'path_coverage': 0,
-        'stability_score': 0
+        'stability_score': 0,
+        'error': None
     }
 
     json_path = Path(session_dir) / 'all_frames.json'
     if not json_path.exists():
+        analysis['error'] = 'File not found'
         return analysis
 
-    with open(json_path) as f:
-        data = json.load(f)
+    try:
+        with open(json_path) as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        analysis['error'] = f'JSON parse error: {e}'
+        return analysis
 
     frames = data['frames']
     analysis['total_frames'] = len(frames)
@@ -196,11 +214,14 @@ def main():
             analysis = analyze_session(result['debug_dir'])
             result['analysis'] = analysis
 
-            print(f"\nSeed {seed} Analysis:")
-            print(f"  Frames: {analysis['total_frames']}")
-            print(f"  Path coverage: {analysis['path_coverage']*100:.1f}%")
-            print(f"  Direction jumps: {analysis['direction_jumps']}")
-            print(f"  Stability score: {analysis['stability_score']:.1f}/100")
+            if analysis.get('error'):
+                print(f"\nSeed {seed} Analysis: ERROR - {analysis['error']}")
+            else:
+                print(f"\nSeed {seed} Analysis:")
+                print(f"  Frames: {analysis['total_frames']}")
+                print(f"  Path coverage: {analysis['path_coverage']*100:.1f}%")
+                print(f"  Direction jumps: {analysis['direction_jumps']}")
+                print(f"  Stability score: {analysis['stability_score']:.1f}/100")
 
         results.append(result)
 
@@ -214,9 +235,12 @@ def main():
     for r in results:
         if 'analysis' in r:
             a = r['analysis']
-            print(f"{r['seed']:<6} {a['total_frames']:<8} {a['path_coverage']*100:>6.1f}%   {a['direction_jumps']:<8} {a['stability_score']:<8.1f}")
+            if a.get('error'):
+                print(f"{r['seed']:<6} {'ERROR: ' + a['error'][:30]}")
+            else:
+                print(f"{r['seed']:<6} {a['total_frames']:<8} {a['path_coverage']*100:>6.1f}%   {a['direction_jumps']:<8} {a['stability_score']:<8.1f}")
         else:
-            print(f"{r['seed']:<6} {'ERROR':<8}")
+            print(f"{r['seed']:<6} {'NO DATA':<8}")
 
     # 結果をJSONで保存
     timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

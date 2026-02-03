@@ -174,13 +174,21 @@ class DebugRecorder(Node):
         self.frame_count += 1
 
     def save_all_frames(self):
-        # 全フレームを1つのJSONファイルに保存
+        # 全フレームを1つのJSONファイルに保存（アトミック書き込み）
         output_file = os.path.join(self.session_dir, 'all_frames.json')
-        with open(output_file, 'w') as f:
+        temp_file = output_file + '.tmp'
+
+        # 一時ファイルに書き込み
+        with open(temp_file, 'w') as f:
             json.dump({
                 'total_frames': len(self.frames),
                 'frames': self.frames
             }, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+
+        # アトミックにリネーム
+        os.replace(temp_file, output_file)
         self.get_logger().info(f'Saved to {output_file}')
 
         # サマリー保存

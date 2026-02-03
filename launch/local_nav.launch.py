@@ -25,6 +25,8 @@ def generate_launch_description():
     record = DeclareLaunchArgument("record", default_value="false")
     record_scan = DeclareLaunchArgument("record_scan", default_value="false",
                                         description="Record LiDAR scan data (large file size)")
+    max_frames = DeclareLaunchArgument("max_frames", default_value="1000",
+                                       description="Maximum frames to record")
     robot_type = DeclareLaunchArgument(
         "robot_type",
         default_value="diff",
@@ -78,6 +80,7 @@ def generate_launch_description():
             "real_ns": LaunchConfiguration("real_ns"),
             "robot_type": LaunchConfiguration("robot_type"),
             "record_scan": LaunchConfiguration("record_scan"),
+            "max_frames": LaunchConfiguration("max_frames"),
         }],
     )
 
@@ -89,6 +92,7 @@ def generate_launch_description():
         use_sim_time,
         record,
         record_scan,
+        max_frames,
         robot_type,
         local_nav_node,
         param_server_node,
