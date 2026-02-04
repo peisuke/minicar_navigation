@@ -277,16 +277,24 @@ class PathPlannerConfig:
     DIST_THRESH: float = 15.0
     BORDER_THICKNESS: int = 1
     LOCAL_DIST_THRESH: float = 10.0
-    MAX_GRADIENT_DROP: float = 16.0  # エッジの距離場勾配の最大許容下降量(px) 0.08m / 0.005 = 16px
-    
+    MAX_GRADIENT_DROP: float = 24.0  # エッジの距離場勾配の最大許容下降量(px) - 前方パス安定性のため緩和
+    LOOKAHEAD_ALPHA: float = 1.0     # パス末端ルックアヘッド係数（末端エッジ長の何倍先を見るか）
+    MIN_PATH_NODES: int = 3          # ルックアヘッド刈り込み後の最小ノード数（未満のパスは棄却）
+    MIN_PEAK_DIST_VALUE: float = 100.0  # ピーク検出時の最低距離場値（0-255、壁近くのピーク除外用）
+
     # パス生成パラメータ
     START_IDS: Tuple[int, ...] = (0,)
 
     # 方向バイアス（度）: 正=反時計回り（左寄り）、負=時計回り（右寄り）
     # 例: -30.0 → 右に30度傾いた方向を「直進」として扱う
     DIRECTION_BIAS_DEG: float = 0.0
-    
-    
+
+    # Belief-based path selection パラメータ
+    BELIEF_EMA_ALPHA: float = 0.3             # 信念更新の指数移動平均係数 (0=更新なし, 1=即時置換)
+    BELIEF_CONFIDENCE_LENGTH_SCALE: float = 2.0  # 信頼度算出のパス長スケール(m)
+    BELIEF_MIN_CONFIDENCE: float = 0.1         # 最低信頼度閾値（未満のパスは選択候補外）
+    BELIEF_CONSISTENCY_WEIGHT: float = 2.0     # スコア中の一貫性重み（加算式）
+
     # パス平滑化パラメータ
     CONTROL_STRENGTH_FACTOR: float = 3.0  # エルミート補間の制御点強度係数
     AUTO_WEIGHT_DISTANCE_FACTOR: float = 15.0  # 自動ブレンドの距離重み係数
@@ -651,7 +659,9 @@ class PeakDetector:
             peak_i = self._detect_peaks_1d(v.astype(float), offs)
 
             for i in peak_i:
-                peaks.append((int(xs_l[i]), int(ys_l[i]), float(vals_l[i]), int(lab)))
+                val = float(vals_l[i])
+                if val >= self.config.MIN_PEAK_DIST_VALUE:
+                    peaks.append((int(xs_l[i]), int(ys_l[i]), val, int(lab)))
 
         peaks.sort(key=lambda t: t[2], reverse=True)
         return peaks
@@ -722,14 +732,71 @@ class GraphPathSearcher:
         deduplicated_paths_ids = self.deduplicator.deduplicate_paths(
             paths_ids, centered_points, result_paths["flat_to_pts"]
         )
-        
-        # 3. ID→座標変換
-        deduplicated_paths_coords = self._paths_to_coords(
-            deduplicated_paths_ids, centered_points, result_paths["flat_to_pts"]
+
+        # 3. パス末端ルックアヘッド刈り込み
+        trimmed_paths_ids = self._trim_paths_by_lookahead(
+            deduplicated_paths_ids, centered_points, result_paths["flat_to_pts"],
+            dist_inside, center_x, center_y, dist_thresh
         )
-        
+
+        # 4. ID→座標変換
+        deduplicated_paths_coords = self._paths_to_coords(
+            trimmed_paths_ids, centered_points, result_paths["flat_to_pts"]
+        )
+
         return deduplicated_paths_coords
     
+    def _trim_paths_by_lookahead(self, paths_ids: List[List[int]], centered_pts: np.ndarray,
+                                flat_to_pts: np.ndarray, dist_map: np.ndarray,
+                                cx: int, cy: int, thr: float) -> List[List[int]]:
+        """パス末端からルックアヘッドで壁方向ノードを刈り込む
+
+        A->B->C->Dのパスで、C->Dの延長先が壁ならDを削除。
+        削除後のA->B->Cでも、B->Cの延長先が壁ならCを削除。
+        最終的にMIN_PATH_NODES未満になったパスは棄却する。
+        """
+        if not paths_ids:
+            return []
+
+        H, W = dist_map.shape[:2]
+        alpha = self.config.LOOKAHEAD_ALPHA
+        max_drop = self.config.MAX_GRADIENT_DROP
+        min_nodes = self.config.MIN_PATH_NODES
+        trimmed = []
+
+        for path in paths_ids:
+            path = list(path)
+
+            while len(path) >= 2:
+                # 末端エッジ: path[-2] -> path[-1]
+                src_idx = flat_to_pts[path[-2]]
+                dst_idx = flat_to_pts[path[-1]]
+                src_pt = centered_pts[src_idx].astype(float)
+                dst_pt = centered_pts[dst_idx].astype(float)
+                edge_vec = dst_pt - src_pt
+
+                # ルックアヘッド地点
+                la = dst_pt + alpha * edge_vec
+                la_x = np.clip(int(np.rint(la[0])) + cx, 0, W - 1)
+                la_y = np.clip(int(np.rint(la[1])) + cy, 0, H - 1)
+                la_val = dist_map[la_y, la_x]
+
+                # dst地点の距離値
+                dst_x = np.clip(int(np.rint(dst_pt[0])) + cx, 0, W - 1)
+                dst_y = np.clip(int(np.rint(dst_pt[1])) + cy, 0, H - 1)
+                dst_val = dist_map[dst_y, dst_x]
+
+                # 勾配チェック: 延長先で距離値が大きく下がるなら末端を削除
+                gradient = la_val - dst_val
+                if gradient >= -max_drop:
+                    break  # 壁に向かっていない→刈り込み終了
+                path.pop()
+
+            if len(path) >= min_nodes:
+                trimmed.append(path)
+
+        return trimmed
+
     def _paths_to_coords(self, paths_ids: List[List[int]], centered_pts: np.ndarray, flat_to_pts: np.ndarray):
         """パスIDを座標に変換するプライベートメソッド"""
         coordinate_paths = []
@@ -830,13 +897,13 @@ class GraphPathSearcher:
     def _validate_edges(self, graph_data, dist_map, cx, cy, thr, front_deg):
         """エッジの有効性を検証"""
         src_id, dst_id, flat_pts = graph_data['src_id'], graph_data['dst_id'], graph_data['flat_pts']
-        
+
         # 距離による検証
         dist_mask = self._validate_edge_distances(flat_pts, src_id, dst_id, dist_map, cx, cy, thr)
-        
+
         # 方向による検証
         direction_mask = self._validate_edge_directions(flat_pts, src_id, dst_id, front_deg)
-        
+
         return (dist_mask & direction_mask)
     
     def _validate_edge_distances(self, flat_pts, src_id, dst_id, dist_map, cx, cy, thr):
@@ -1380,7 +1447,7 @@ class PotentialPathSmoother:
         start_pos = np.array([0.0, 0.0])  # centered coordinates
         # ロボットの現在の向き（画面座標系では前方=X軸正方向）
         current_direction = np.array([1.0, 0.0])  # 前方向
-        
+
         for path in paths_coords:
             if len(path) > 2:
                 smoothed_path = self._parameter_free_path_optimization(
@@ -1389,7 +1456,7 @@ class PotentialPathSmoother:
                 smoothed_paths.append(smoothed_path)
             else:
                 smoothed_paths.append(path)
-                
+
         return smoothed_paths
     
     
@@ -1510,7 +1577,11 @@ class LocalPathPlanner:
         """        
         self.config = config or PathPlannerConfig()
         self.path_pipeline = PathPipeline(config=self.config)
-       
+
+        # Belief state for path selection (persists across frames)
+        self._belief_direction = np.array([1.0, 0.0], dtype=np.float32)  # 初期: 前方
+        self._belief_initialized = False
+
     def generate_local_paths(self, last_lidar_data: Dict[str, Any]) -> List[np.ndarray]:
         """ローカルパス生成（公開API）
         
@@ -1594,24 +1665,116 @@ class LocalPathPlanner:
         return vp.astype(np.int32)
     
     def select_outermost_path(self, paths: List[np.ndarray]) -> Tuple[np.ndarray, int]:
-        """パス選択ビジネスロジック（最も外側のパスを選択）
-        
-        ビジネスルール: 最も直進に近いパスを選択し、効率的な移動を実現
-        
+        """Belief-based path selection.
+
+        各パスを信頼度×信念一貫性でスコアリングし、最高スコアを選択。
+        選択後に信念方向をEMA更新する。パスが0本なら信念を維持。
+
         Args:
-            paths: ローカルパス配列のリスト（既にソート済み）
-            
+            paths: ローカルパス配列のリスト
+
         Returns:
             (選択されたパス, インデックス)
         """
         if not paths:
             return np.array([]), -1
-            
-        # 最後のパスが最も外側（直進に近い）
-        outermost_idx = len(paths) - 1
-        selected_path = paths[outermost_idx]
-        
-        return selected_path, outermost_idx
+
+        # 全パスをスコアリング
+        candidates = []
+        for idx, path in enumerate(paths):
+            score, confidence, _ = self._score_path(path)
+            if confidence >= self.config.BELIEF_MIN_CONFIDENCE:
+                candidates.append((score, confidence, idx))
+
+        if not candidates:
+            return np.array([]), -1
+
+        # 最高スコアのパスを選択
+        candidates.sort(key=lambda x: x[0], reverse=True)
+        _, best_confidence, best_idx = candidates[0]
+        best_path = paths[best_idx]
+
+        # 信念更新
+        self._update_belief(best_path, best_confidence)
+
+        return best_path, best_idx
+
+    def _calculate_path_confidence(self, path: np.ndarray) -> float:
+        """パスの物理長から信頼度(0~1)を算出。長いパスほど高信頼。"""
+        if len(path) == 0:
+            return 0.0
+
+        if len(path) > 1:
+            diffs = np.diff(path, axis=0)
+            physical_length = float(np.sum(np.linalg.norm(diffs, axis=1)))
+        else:
+            physical_length = float(np.linalg.norm(path[0]))
+
+        return float(np.tanh(physical_length / self.config.BELIEF_CONFIDENCE_LENGTH_SCALE))
+
+    def _extract_path_direction(self, path: np.ndarray) -> np.ndarray:
+        """パス終点方向の単位ベクトルを取得。"""
+        if len(path) == 0:
+            return None
+
+        endpoint = path[-1]
+        dist = np.linalg.norm(endpoint)
+        if dist < 1e-6:
+            return None
+
+        return (endpoint / dist).astype(np.float32)
+
+    def _calculate_consistency(self, path_direction: np.ndarray) -> float:
+        """信念方向との余弦類似度(-1~1)を算出。"""
+        if path_direction is None:
+            return 0.0
+        return float(np.dot(self._belief_direction, path_direction))
+
+    def _score_path(self, path: np.ndarray) -> Tuple[float, float, float]:
+        """confidence + weight × (consistency + bias) で総合スコアを算出。
+
+        - consistency: 信念方向との一致度（過去の選択との連続性）
+        - bias: DIRECTION_BIAS_DEG方向との一致度（優先方向）
+        """
+        confidence = self._calculate_path_confidence(path)
+        path_direction = self._extract_path_direction(path)
+
+        if path_direction is None:
+            return (confidence, confidence, 0.0)
+
+        # バイアス方向との一致度
+        bias_rad = np.deg2rad(self.config.DIRECTION_BIAS_DEG)
+        bias_direction = np.array([np.cos(bias_rad), np.sin(bias_rad)], dtype=np.float32)
+        bias_preference = float(np.dot(bias_direction, path_direction))
+
+        if not self._belief_initialized:
+            # 初期化前はバイアスのみ使用
+            score = confidence + self.config.BELIEF_CONSISTENCY_WEIGHT * bias_preference
+            return (score, confidence, bias_preference)
+
+        # 信念との一致度 + バイアス
+        consistency = self._calculate_consistency(path_direction)
+        combined = (consistency + bias_preference) / 2.0
+        score = confidence + self.config.BELIEF_CONSISTENCY_WEIGHT * combined
+        return (score, confidence, combined)
+
+    def _update_belief(self, selected_path: np.ndarray, confidence: float):
+        """選択パスの方向でEMA更新。高信頼パスほど大きく信念を動かす。"""
+        if len(selected_path) == 0:
+            return
+
+        path_direction = self._extract_path_direction(selected_path)
+        if path_direction is None:
+            return
+
+        effective_alpha = self.config.BELIEF_EMA_ALPHA * confidence
+        new_belief = (1.0 - effective_alpha) * self._belief_direction + effective_alpha * path_direction
+
+        belief_norm = np.linalg.norm(new_belief)
+        if belief_norm > 1e-6:
+            self._belief_direction = (new_belief / belief_norm).astype(np.float32)
+
+        self._belief_initialized = True
 
 
 def main():

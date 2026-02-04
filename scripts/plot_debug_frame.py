@@ -107,9 +107,15 @@ def plot_frame(data: dict, frame_idx: int, output_path: str = None, show_regener
     ax.arrow(0, 0, 0.1, 0, head_width=0.02, head_length=0.01, fc='green', ec='green')
 
     # オドメトリ情報
-    qz = odom['orientation']['z']
-    qw = odom['orientation']['w']
-    yaw = 2 * np.arctan2(qz, qw)
+    if odom is not None:
+        qz = odom['orientation']['z']
+        qw = odom['orientation']['w']
+        yaw = 2 * np.arctan2(qz, qw)
+        odom_label = (f'Odom: ({odom["position"]["x"]:.3f}, {odom["position"]["y"]:.3f}), '
+                      f'Yaw: {np.degrees(yaw):.1f}°')
+    else:
+        yaw = 0.0
+        odom_label = 'Odom: N/A'
 
     # 軸設定
     ax.set_xlim(-3.0, 3.0)
@@ -122,9 +128,7 @@ def plot_frame(data: dict, frame_idx: int, output_path: str = None, show_regener
     # ラベル
     ax.set_xlabel('X [m] (Forward)')
     ax.set_ylabel('Y [m] (Left)')
-    ax.set_title(f'Frame {frame_idx} / {total_frames-1}\n'
-                 f'Odom: ({odom["position"]["x"]:.3f}, {odom["position"]["y"]:.3f}), '
-                 f'Yaw: {np.degrees(yaw):.1f}°')
+    ax.set_title(f'Frame {frame_idx} / {total_frames-1}\n{odom_label}')
     ax.legend(loc='upper right')
 
     plt.tight_layout()

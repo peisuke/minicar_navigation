@@ -27,9 +27,12 @@ class DebugRecorder(Node):
         self.declare_parameter('input_real', False)
         self.declare_parameter('sim_ns', 'sim_robot')
         self.declare_parameter('real_ns', 'real_robot')
+        self.declare_parameter('robot_type', 'diff')
+        self.declare_parameter('record_scan', False)  # LiDARデータを記録するか（容量大）
 
         self.output_dir = self.get_parameter('output_dir').get_parameter_value().string_value
         self.max_frames = self.get_parameter('max_frames').get_parameter_value().integer_value
+        self.record_scan = self.get_parameter('record_scan').get_parameter_value().bool_value
 
         # 名前空間の決定
         input_sim = self.get_parameter('input_sim').get_parameter_value().bool_value
@@ -61,10 +64,21 @@ class DebugRecorder(Node):
         self.frame_count = 0
         self.recording = True
 
+        # robot_typeに応じたtopic名
+        robot_type = self.get_parameter('robot_type').get_parameter_value().string_value
+        if robot_type == 'ackermann':
+            controller_prefix = 'ackermann_steering_controller'
+            odom_suffix = 'odometry'
+            cmd_vel_suffix = 'reference_unstamped'
+        else:
+            controller_prefix = 'diff_drive_controller'
+            odom_suffix = 'odom'
+            cmd_vel_suffix = 'cmd_vel_unstamped'
+
         # サブスクライバー
         scan_topic = f'/{self.ns}/scan'
-        odom_topic = f'/{self.ns}/diff_drive_controller/odom'
-        cmd_vel_topic = f'/{self.ns}/diff_drive_controller/cmd_vel_unstamped'
+        odom_topic = f'/{self.ns}/{controller_prefix}/{odom_suffix}'
+        cmd_vel_topic = f'/{self.ns}/{controller_prefix}/{cmd_vel_suffix}'
 
         self.scan_sub = self.create_subscription(
             LaserScan, scan_topic, self.scan_callback, 10)
@@ -81,7 +95,7 @@ class DebugRecorder(Node):
         self.timer = self.create_timer(0.1, self.save_frame)
 
         self.get_logger().info(f'Debug Recorder started. Output: {self.session_dir}')
-        self.get_logger().info(f'Max frames: {self.max_frames}')
+        self.get_logger().info(f'Max frames: {self.max_frames}, Record scan: {self.record_scan}')
 
     def scan_callback(self, msg: LaserScan):
         self.current_frame['scan'] = {
@@ -146,7 +160,7 @@ class DebugRecorder(Node):
         frame = {
             'frame_id': self.frame_count,
             'timestamp': time.time(),
-            'scan': self.current_frame['scan'],
+            'scan': self.current_frame['scan'] if self.record_scan else None,
             'odom': self.current_frame['odom'],
             'local_path': self.current_frame['local_path'],
             'cmd_vel': self.current_frame['cmd_vel']
@@ -160,13 +174,21 @@ class DebugRecorder(Node):
         self.frame_count += 1
 
     def save_all_frames(self):
-        # 全フレームを1つのJSONファイルに保存
+        # 全フレームを1つのJSONファイルに保存（アトミック書き込み）
         output_file = os.path.join(self.session_dir, 'all_frames.json')
-        with open(output_file, 'w') as f:
+        temp_file = output_file + '.tmp'
+
+        # 一時ファイルに書き込み
+        with open(temp_file, 'w') as f:
             json.dump({
                 'total_frames': len(self.frames),
                 'frames': self.frames
             }, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+
+        # アトミックにリネーム
+        os.replace(temp_file, output_file)
         self.get_logger().info(f'Saved to {output_file}')
 
         # サマリー保存
