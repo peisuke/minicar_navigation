@@ -67,13 +67,13 @@ belief = normalize((1 - effective_alpha) × belief + effective_alpha × path_dir
 | `BELIEF_CONSISTENCY_WEIGHT` | 2.0 | スコア中の一貫性重み（加算式）|
 | `DIRECTION_BIAS_DEG` | 0.0 | 方向バイアス（度）正=左寄り、負=右寄り |
 | `MAX_GRADIENT_DROP` | 24.0 | エッジの距離場勾配の最大許容下降量(px) |
-| `MIN_PEAK_DIST_VALUE` | 100.0 | ピーク検出時の最低距離場値（0-255）|
+| `MIN_PEAK_DIST_VALUE` | 30.0 | ピーク検出時の最低距離場値（0-255）|
 
 ### パラメータ調整ガイド
 
 - **オシレーションが多い場合**: `BELIEF_CONSISTENCY_WEIGHT` を上げる（例: 2.0 → 3.0）
 - **方向変化が遅すぎる場合**: `BELIEF_EMA_ALPHA` を上げる（例: 0.3 → 0.5）
-- **壁方向のパスが選択される場合**: `MIN_PEAK_DIST_VALUE` を上げる（例: 100 → 120）
+- **壁方向のパスが選択される場合**: `MIN_PEAK_DIST_VALUE` を上げる（例: 30 → 50）
 - **前方パスが生成されない場合**: `MAX_GRADIENT_DROP` を上げる（例: 24 → 32）
 
 ## フィルタリング
@@ -87,8 +87,8 @@ if dist_value >= MIN_PEAK_DIST_VALUE:
     peaks.append(peak)
 ```
 
-- 壁方向（scan_range < 2m）のピークは通常 dist_value < 100
-- 走行可能方向のピークは通常 dist_value > 150
+- 実機環境ではピーク値が低くなる傾向（max 30-100程度）
+- シミュレーション環境では高くなる傾向（100-200程度）
 
 ### 2. エッジ勾配フィルタ (MAX_GRADIENT_DROP)
 

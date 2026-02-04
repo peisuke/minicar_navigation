@@ -280,7 +280,7 @@ class PathPlannerConfig:
     MAX_GRADIENT_DROP: float = 24.0  # エッジの距離場勾配の最大許容下降量(px) - 前方パス安定性のため緩和
     LOOKAHEAD_ALPHA: float = 1.0     # パス末端ルックアヘッド係数（末端エッジ長の何倍先を見るか）
     MIN_PATH_NODES: int = 3          # ルックアヘッド刈り込み後の最小ノード数（未満のパスは棄却）
-    MIN_PEAK_DIST_VALUE: float = 100.0  # ピーク検出時の最低距離場値（0-255、壁近くのピーク除外用）
+    MIN_PEAK_DIST_VALUE: float = 30.0  # ピーク検出時の最低距離場値（0-255、壁近くのピーク除外用）
 
     # パス生成パラメータ
     START_IDS: Tuple[int, ...] = (0,)

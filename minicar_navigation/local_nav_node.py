@@ -19,8 +19,8 @@ from .controller import ControllerFactory
 
 class LocalNavNode(Node):
     # 緊急停止パラメータ
-    EMERGENCY_STOP_DIST = 0.10  # 10cm以内に障害物があれば停止
-    EMERGENCY_STOP_CONE_DEG = 15.0  # 前方±15°のコーンを検査
+    EMERGENCY_STOP_DIST = 0.20  # 20cm以内に障害物があれば停止
+    EMERGENCY_STOP_CONE_DEG = 45.0  # 前方±45°のコーンを検査
     EMERGENCY_STOP_RATIO = 0.3  # コーン内の30%が閾値以下で停止（ノイズ除去）
 
     def __init__(self):
