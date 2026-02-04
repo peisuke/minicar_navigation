@@ -18,6 +18,11 @@ from .planner import local_path_planner
 from .controller import ControllerFactory
 
 class LocalNavNode(Node):
+    # 緊急停止パラメータ
+    EMERGENCY_STOP_DIST = 0.10  # 10cm以内に障害物があれば停止
+    EMERGENCY_STOP_CONE_DEG = 15.0  # 前方±15°のコーンを検査
+    EMERGENCY_STOP_RATIO = 0.3  # コーン内の30%が閾値以下で停止（ノイズ除去）
+
     def __init__(self):
         super().__init__("local_nav_node", automatically_declare_parameters_from_overrides=True)
 
@@ -103,21 +108,27 @@ class LocalNavNode(Node):
             return
         lidar_data = self.latest_lidar_data
 
+        # 緊急停止チェック（最優先 - パス計算より先に判定）
+        if self._check_emergency_stop(lidar_data):
+            stop_cmd = Twist()
+            self._publish_cmd_vel(stop_cmd)
+            return
+
         # プランナーでパス生成して出力確認
         if self.planner is not None:
             try:
                 paths, extra = self.planner.generate_local_paths(lidar_data)
                 self.get_logger().info(f"Generated {len(paths)} local paths")
-                
+
                 # パスの詳細情報を出力
                 for i, path in enumerate(paths[:3]):  # 最初の3つのパスのみ表示
                     self.get_logger().info(f"Path {i}: {len(path)} points")
-                
+
                 # 最適パスを選択してrvizで可視化
                 selected_path, selected_idx = self.planner.select_outermost_path(paths)
                 self.get_logger().info(f"Selected path {selected_idx} with {len(selected_path)} points")
                 self.publish_path_for_visualization(selected_path)
-                
+
                 # パス追従制御
                 if len(selected_path) > 0:
                     # controller をローカルに退避（差し替え中に参照が壊れないように）
@@ -125,15 +136,15 @@ class LocalNavNode(Node):
                         controller = self.controller
 
                     linear_vel, angular_vel = self.controller.compute_control(selected_path)
-                    
+
                     # 制御コマンドを送信
                     cmd = Twist()
                     cmd.linear.x = linear_vel
                     cmd.angular.z = angular_vel
                     self._publish_cmd_vel(cmd)
-                    
+
                     self.get_logger().info(f"Control: linear={linear_vel:.3f}, angular={angular_vel:.3f}")
-                    
+
                     # ゴール到達判定
                     if self.controller.is_goal_reached(selected_path):
                         self.get_logger().info("Goal reached!")
@@ -243,6 +254,42 @@ class LocalNavNode(Node):
         """Publish command to all configured output publishers"""
         for name, publisher in self.cmd_publishers.items():
             publisher.publish(cmd_msg)
+
+    def _check_emergency_stop(self, lidar_data: dict) -> bool:
+        """
+        前方に障害物があるかチェックする緊急停止判定
+
+        Returns:
+            True: 緊急停止が必要（前方コーン内の30%以上が閾値以内）
+            False: 通常走行可能
+        """
+        ranges = lidar_data["ranges"]
+        angles = lidar_data["angles"]
+
+        # 前方コーン（±15°）内のレンジを抽出
+        # 角度は0〜2πの範囲なので、前方(0°)付近と2π付近の両方をチェック
+        cone_rad = np.radians(self.EMERGENCY_STOP_CONE_DEG)
+        front_mask = (angles <= cone_rad) | (angles >= 2 * np.pi - cone_rad)
+
+        if not np.any(front_mask):
+            return False
+
+        front_ranges = ranges[front_mask]
+        total_points = len(front_ranges)
+
+        # 閾値以下の点の割合をチェック（ノイズ除去）
+        close_points = np.sum(front_ranges < self.EMERGENCY_STOP_DIST)
+        close_ratio = close_points / total_points
+
+        if close_ratio >= self.EMERGENCY_STOP_RATIO:
+            min_front_dist = np.min(front_ranges)
+            self.get_logger().warn(
+                f"EMERGENCY STOP: {close_ratio:.0%} points at <{self.EMERGENCY_STOP_DIST}m "
+                f"(min: {min_front_dist:.3f}m)"
+            )
+            return True
+
+        return False
             
     def _initialize_controller(self):
         """パラメータに基づいてコントローラーを初期化"""
