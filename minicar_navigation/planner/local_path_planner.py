@@ -274,13 +274,13 @@ class PathPlannerConfig:
     PATH_FRONT_DEG: float = 90.0     # パス構築用の前方角度
     
     # 距離パラメータ
-    DIST_THRESH: float = 15.0
+    DIST_THRESH: float = 5.0         # 壁からの最小安全距離(px) - 狭い道対応で15.0→5.0
     BORDER_THICKNESS: int = 1
-    LOCAL_DIST_THRESH: float = 10.0
+    LOCAL_DIST_THRESH: float = 4.0   # ローカル計画の距離閾値(px) - 狭い道対応で10.0→4.0
     MAX_GRADIENT_DROP: float = 24.0  # エッジの距離場勾配の最大許容下降量(px) - 前方パス安定性のため緩和
     LOOKAHEAD_ALPHA: float = 1.0     # パス末端ルックアヘッド係数（末端エッジ長の何倍先を見るか）
     MIN_PATH_NODES: int = 3          # ルックアヘッド刈り込み後の最小ノード数（未満のパスは棄却）
-    MIN_PEAK_DIST_VALUE: float = 30.0  # ピーク検出時の最低距離場値（0-255、壁近くのピーク除外用）
+    MIN_PEAK_DIST_VALUE: float = 15.0  # ピーク検出時の最低距離場値(0-255) - 狭い道対応で30.0→15.0
 
     # パス生成パラメータ
     START_IDS: Tuple[int, ...] = (0,)
